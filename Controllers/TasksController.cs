@@ -1,0 +1,103 @@
+﻿using FlowOS.Api.Data;
+using FlowOS.Api.DTOs;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Task = FlowOS.Api.Models.Task;
+
+namespace FlowOS.Api.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    [Authorize]  // Require login
+    public class TasksController : ControllerBase
+    {
+        private readonly FlowOSContext _context;
+
+        public TasksController(FlowOSContext context)
+        {
+            _context = context;
+        }
+
+        [HttpPost("Create")]
+        public async Task<IActionResult> CreateTask([FromBody] TaskCreateDto dto)
+        {
+            var userId = User.FindFirst("id")?.Value; // from JWT (string)
+
+            if (userId == null)
+                return Unauthorized();
+
+            var task = new Task
+            {
+                Title = dto.Title,
+                Description = dto.Description,
+                DueDate = dto.DueDate,
+                Priority = dto.Priority,
+                UserId = userId,
+                Completed = false
+            };
+
+            _context.Tasks.Add(task);
+            await _context.SaveChangesAsync();
+
+            return Ok(task);
+        }
+
+        // GET: api/tasks
+        [HttpGet("Get")]
+        public async Task<IActionResult> GetTasks()
+        {
+            var userId = User.FindFirst("id")?.Value; // from JWT (string)
+
+            if (userId == null)
+                return Unauthorized();
+
+            var tasks = await _context.Tasks
+                .Where(t => t.UserId == userId)
+                .ToListAsync();
+            return Ok(tasks);
+        }
+
+        // PUT: api/tasks/{id}
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateTask(int id, [FromBody] TaskUpdateDto dto)
+        {
+            var userId = User.FindFirst("id")?.Value; // from JWT (string)
+
+            if (userId == null)
+                return Unauthorized();
+
+            var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+
+            if (task == null) return NotFound();
+
+            task.Title = dto.Title;
+            task.Description = dto.Description;
+            task.DueDate = dto.DueDate;
+            task.Priority = dto.Priority;
+            task.Completed = dto.Completed;
+
+            await _context.SaveChangesAsync();
+            return Ok(task);
+        }
+
+        // DELETE: api/tasks/{id}
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteTask(int id)
+        {
+            var userId = User.FindFirst("id")?.Value; // from JWT (string)
+
+            if (userId == null)
+                return Unauthorized();
+
+            var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+
+            if (task == null) return NotFound();
+
+            _context.Tasks.Remove(task);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }        
+    }
+}
