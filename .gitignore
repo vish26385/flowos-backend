@@ -1,4 +1,4 @@
-# Build files
+﻿# Build files
 bin/
 obj/
 
@@ -27,3 +27,12 @@ publish/
 # Other
 *.db
 *.sqlite
+
+# 🔒 Exclude publish profiles (Azure or local deployment configs)
+*.pubxml
+*.pubxml.user
+*.pubxml~*
+
+# 🔒 Exclude Azure Service Dependencies profiles
+ServiceDependencies/
+ServiceDependencies/**
