@@ -20,7 +20,7 @@ namespace FlowOS.Api.Controllers
             _context = context;
         }
 
-        [HttpPost("Create")]
+        [HttpPost]
         public async Task<IActionResult> CreateTask([FromBody] TaskCreateDto dto)
         {
             var userId = User.FindFirst("id")?.Value; // from JWT (string)
@@ -57,14 +57,15 @@ namespace FlowOS.Api.Controllers
         //        .Where(t => t.UserId == userId)
         //        .ToListAsync();
         //    return Ok(tasks);
-        //}
+        //}        
 
-        // ✅ GET /api/tasks or /api/tasks?due=2025-10-13
+        // ✅ Get all /api/tasks or by due date /api/tasks?due=2025-10-13
         [HttpGet]
         public async Task<IActionResult> GetTasks([FromQuery] DateTime? due)
         {
-            // Get current logged-in user ID from JWT
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirst("id")?.Value;
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                         ?? User.FindFirst("id")?.Value;
+
             if (string.IsNullOrEmpty(userId))
                 return Unauthorized();
 
@@ -72,7 +73,6 @@ namespace FlowOS.Api.Controllers
                 .Where(t => t.UserId == userId)
                 .AsQueryable();
 
-            // Filter by date if specified (matches ?due=yyyy-MM-dd)
             if (due.HasValue)
                 query = query.Where(t => t.DueDate.Date == due.Value.Date);
 
@@ -83,7 +83,25 @@ namespace FlowOS.Api.Controllers
 
             return Ok(tasks);
         }
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetTask(int id)
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                         ?? User.FindFirst("id")?.Value;
 
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized();
+
+            // Find the task that belongs to the current user
+            var task = await _context.Tasks
+                .Where(t => t.UserId == userId && t.Id == id)
+                .FirstOrDefaultAsync();
+
+            if (task == null)
+                return NotFound(new { message = "Task not found or access denied." });
+
+            return Ok(task);
+        }
         // PUT: api/tasks/{id}
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateTask(int id, [FromBody] TaskUpdateDto dto)
