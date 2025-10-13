@@ -3,6 +3,7 @@ using FlowOS.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using Task = FlowOS.Api.Models.Task;
 
 namespace FlowOS.Api.Controllers
@@ -43,18 +44,43 @@ namespace FlowOS.Api.Controllers
             return Ok(task);
         }
 
-        // GET: api/tasks
-        [HttpGet("Get")]
-        public async Task<IActionResult> GetTasks()
-        {
-            var userId = User.FindFirst("id")?.Value; // from JWT (string)
+        //// GET: api/tasks
+        //[HttpGet("Get")]
+        //public async Task<IActionResult> GetTasks()
+        //{
+        //    var userId = User.FindFirst("id")?.Value; // from JWT (string)
 
-            if (userId == null)
+        //    if (userId == null)
+        //        return Unauthorized();
+
+        //    var tasks = await _context.Tasks
+        //        .Where(t => t.UserId == userId)
+        //        .ToListAsync();
+        //    return Ok(tasks);
+        //}
+
+        // ✅ GET /api/tasks or /api/tasks?due=2025-10-13
+        [HttpGet]
+        public async Task<IActionResult> GetTasks([FromQuery] DateTime? due)
+        {
+            // Get current logged-in user ID from JWT
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirst("id")?.Value;
+            if (string.IsNullOrEmpty(userId))
                 return Unauthorized();
 
-            var tasks = await _context.Tasks
+            var query = _context.Tasks
                 .Where(t => t.UserId == userId)
+                .AsQueryable();
+
+            // Filter by date if specified (matches ?due=yyyy-MM-dd)
+            if (due.HasValue)
+                query = query.Where(t => t.DueDate.Date == due.Value.Date);
+
+            var tasks = await query
+                .OrderBy(t => t.DueDate)
+                .ThenByDescending(t => t.Priority)
                 .ToListAsync();
+
             return Ok(tasks);
         }
 
