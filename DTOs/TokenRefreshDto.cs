@@ -1,6 +1,6 @@
 ﻿namespace FlowOS.Api.DTOs
 {
-    public class RefreshDto
+    public class TokenRefreshDto
     {
         public string RefreshToken { get; set; } = string.Empty;
     }

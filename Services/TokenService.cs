@@ -1,4 +1,6 @@
-﻿using FlowOS.Api.Models;
+﻿using FlowOS.Api.Data;
+using FlowOS.Api.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -9,7 +11,7 @@ namespace FlowOS.Api.Services
 {
     public class TokenService
     {
-        private readonly IConfiguration _config;
+        private readonly IConfiguration _config;       
 
         public TokenService(IConfiguration config)
         {
@@ -35,7 +37,7 @@ namespace FlowOS.Api.Services
 
             var token = new JwtSecurityToken(
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(30),
+                expires: DateTime.UtcNow.AddMinutes(15),
                 signingCredentials: creds
             );
 

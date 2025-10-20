@@ -1,9 +1,12 @@
-﻿using FlowOS.Api.DTOs;
+﻿using FlowOS.Api.Data;
+using FlowOS.Api.DTOs;
 using FlowOS.Api.Models;
 using FlowOS.Api.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -19,12 +22,14 @@ namespace FlowOS.Api.Controllers
         private readonly IConfiguration _config;
         private static readonly Dictionary<string, string> _refreshTokens = new(); // demo in-memory store
         private readonly TokenService _tokenService;
+        private readonly FlowOSContext _context;
 
-        public AuthController(UserManager<ApplicationUser> userManager, IConfiguration config, TokenService tokenService)
+        public AuthController(UserManager<ApplicationUser> userManager, IConfiguration config, TokenService tokenService, FlowOSContext context)
         {
             _userManager = userManager;
             _config = config;
             _tokenService = tokenService;
+            _context = context;
         }
 
         //[HttpPost("register")]
@@ -85,11 +90,34 @@ namespace FlowOS.Api.Controllers
             var token = await _tokenService.GenerateJwtTokenAsync(user);
             var refreshToken = await _tokenService.GenerateRefreshTokenAsync();
 
-            // Store refresh token (temporary memory for demo — use DB in production)
-            _refreshTokens[refreshToken] = user.Email;
+            // Save refresh token to DB
+            var userRefresh = new UserRefreshToken
+            {
+                UserId = user.Id,
+                Token = refreshToken,
+                ExpiresAt = DateTime.UtcNow.AddDays(7), // valid for 7 days
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _context.UserRefreshTokens.Add(userRefresh);
+            await _context.SaveChangesAsync();
 
             return Ok(new { token, refreshToken });
         }
+
+        //[HttpPost("login")]
+        //public async Task<IActionResult> Login([FromBody] LoginDto dto)
+        //{
+        //    var user = await _userManager.FindByEmailAsync(dto.Email);
+        //    if (user == null || !(await _userManager.CheckPasswordAsync(user, dto.Password)))
+        //        return Unauthorized(new { message = "Invalid credentials" });
+
+        //    var token = await _tokenService.GenerateJwtTokenAsync(user);
+        //    var refreshToken = await _tokenService.GenerateRefreshTokenAsync();
+        //    _refreshTokens[refreshToken] = dto.Email;
+
+        //    return Ok(new { token, refreshToken });
+        //}
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginDto dto)
@@ -98,20 +126,51 @@ namespace FlowOS.Api.Controllers
             if (user == null || !(await _userManager.CheckPasswordAsync(user, dto.Password)))
                 return Unauthorized(new { message = "Invalid credentials" });
 
+            // ✅ Generate tokens
             var token = await _tokenService.GenerateJwtTokenAsync(user);
             var refreshToken = await _tokenService.GenerateRefreshTokenAsync();
-            _refreshTokens[refreshToken] = dto.Email;
 
-            return Ok(new { token, refreshToken });
+            // Save refresh token to DB
+            var userRefresh = new UserRefreshToken
+            {
+                UserId = user.Id,
+                Token = refreshToken,
+                ExpiresAt = DateTime.UtcNow.AddDays(7), // valid for 7 days
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _context.UserRefreshTokens.Add(userRefresh);
+            await _context.SaveChangesAsync();
+
+
+            // ✅ Return all together
+            return Ok(new
+            {
+                token,
+                refreshToken,
+                user = new
+                {
+                    user.Id,
+                    user.Email,
+                    user.UserName
+                }
+            });
         }
 
-        [HttpPost("refresh")]
-        public async Task<IActionResult> Refresh([FromBody] RefreshDto dto)
-        {
-            if (!_refreshTokens.TryGetValue(dto.RefreshToken, out var email))
-                return Unauthorized(new { message = "Invalid or expired refresh token" });
 
-            var user = await _userManager.FindByEmailAsync(email);
+        [HttpPost("refresh")]
+        public async Task<IActionResult> Refresh([FromBody] TokenRefreshDto dto)
+        {
+            var storedRefresh = await _context.UserRefreshTokens
+                 .FirstOrDefaultAsync(r => r.Token == dto.RefreshToken);
+
+            if (storedRefresh == null)
+                return Unauthorized(new { message = "Invalid refresh token" });
+
+            if (!storedRefresh.IsActive)
+                return Unauthorized(new { message = "Token expired or revoked" });
+
+            var user = await _userManager.FindByIdAsync(storedRefresh.UserId);
             if (user == null)
                 return Unauthorized(new { message = "User not found" });
 
@@ -119,11 +178,38 @@ namespace FlowOS.Api.Controllers
             var newJwt = await _tokenService.GenerateJwtTokenAsync(user);
             var newRefreshToken = await _tokenService.GenerateRefreshTokenAsync();
 
-            // Replace old token
-            _refreshTokens.Remove(dto.RefreshToken);
-            _refreshTokens[newRefreshToken] = email;
+            // Revoke old one and add new record
+            storedRefresh.RevokedAt = DateTime.UtcNow;
+            var newRecord = new UserRefreshToken
+            {
+                UserId = user.Id,
+                Token = newRefreshToken,
+                ExpiresAt = DateTime.UtcNow.AddDays(7),
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _context.UserRefreshTokens.Add(newRecord);
+            await _context.SaveChangesAsync();
 
             return Ok(new { token = newJwt, refreshToken = newRefreshToken });
+        }
+
+        // ✅ GET /auth/me
+        [HttpGet("me")]
+        public IActionResult Me()
+        {
+            // Extract user data from JWT claims
+            var email = User.FindFirst(ClaimTypes.Email)?.Value;
+            var name = User.Identity?.Name ?? "Unknown";
+            var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var id = idClaim != null ? int.Parse(idClaim) : 0;
+
+            return Ok(new
+            {
+                id,
+                name,
+                email
+            });
         }
     }
 }
