@@ -23,51 +23,21 @@ namespace FlowOS.Api.Controllers
         private static readonly Dictionary<string, string> _refreshTokens = new(); // demo in-memory store
         private readonly TokenService _tokenService;
         private readonly FlowOSContext _context;
+        private readonly IEmailService _emailService;
 
-        public AuthController(UserManager<ApplicationUser> userManager, IConfiguration config, TokenService tokenService, FlowOSContext context)
+        public AuthController(UserManager<ApplicationUser> userManager, 
+                              IConfiguration config, 
+                              TokenService tokenService, 
+                              FlowOSContext context,
+                              IEmailService emailService
+                              )
         {
             _userManager = userManager;
             _config = config;
             _tokenService = tokenService;
             _context = context;
+            _emailService = emailService;
         }
-
-        //[HttpPost("register")]
-        //public async Task<IActionResult> Register([FromBody] RegisterDto dto)
-        //{
-        //    var user = new ApplicationUser { UserName = dto.Email, Email = dto.Email, FullName = dto.FullName };
-        //    var result = await _userManager.CreateAsync(user, dto.Password);
-
-        //    if (!result.Succeeded)
-        //        return BadRequest(result.Errors);
-
-        //    return Ok(new { message = "User registered successfully" });
-        //}
-
-        //[HttpPost("login")]
-        //public async Task<IActionResult> Login([FromBody] LoginDto dto)
-        //{
-        //    var user = await _userManager.FindByEmailAsync(dto.Email);
-        //    if (user == null || !(await _userManager.CheckPasswordAsync(user, dto.Password)))
-        //        return Unauthorized();
-
-        //    var claims = new[]
-        //    {
-        //        new Claim("id", user.Id),                      // 👈 add this line
-        //        new Claim(ClaimTypes.Name, user.UserName ?? ""),
-        //        new Claim(ClaimTypes.Email, user.Email ?? "")
-        //    };
-
-        //    var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
-        //    var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-        //    var token = new JwtSecurityToken(
-        //        claims: claims,
-        //        expires: DateTime.Now.AddDays(7),
-        //        signingCredentials: creds);
-
-        //    return Ok(new { token = new JwtSecurityTokenHandler().WriteToken(token) });
-        //}
 
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterDto dto)
@@ -104,20 +74,6 @@ namespace FlowOS.Api.Controllers
 
             return Ok(new { token, refreshToken });
         }
-
-        //[HttpPost("login")]
-        //public async Task<IActionResult> Login([FromBody] LoginDto dto)
-        //{
-        //    var user = await _userManager.FindByEmailAsync(dto.Email);
-        //    if (user == null || !(await _userManager.CheckPasswordAsync(user, dto.Password)))
-        //        return Unauthorized(new { message = "Invalid credentials" });
-
-        //    var token = await _tokenService.GenerateJwtTokenAsync(user);
-        //    var refreshToken = await _tokenService.GenerateRefreshTokenAsync();
-        //    _refreshTokens[refreshToken] = dto.Email;
-
-        //    return Ok(new { token, refreshToken });
-        //}
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginDto dto)
@@ -157,10 +113,13 @@ namespace FlowOS.Api.Controllers
             });
         }
 
-
+        [AllowAnonymous]
         [HttpPost("refresh")]
         public async Task<IActionResult> Refresh([FromBody] TokenRefreshDto dto)
         {
+            if (string.IsNullOrEmpty(dto.RefreshToken))
+                return BadRequest(new { message = "Refresh token is required" });
+
             var storedRefresh = await _context.UserRefreshTokens
                  .FirstOrDefaultAsync(r => r.Token == dto.RefreshToken);
 
@@ -194,6 +153,53 @@ namespace FlowOS.Api.Controllers
             return Ok(new { token = newJwt, refreshToken = newRefreshToken });
         }
 
+        [AllowAnonymous]
+        [HttpPost("forgot-password")]        
+        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
+        {
+            var user = await _userManager.FindByEmailAsync(dto.Email);
+            if (user == null)
+                return Ok(new { message = "If the email exists, a reset link has been sent." });
+
+            var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+
+            // Build reset link
+            var resetLink = $"{_config["ClientBaseUrl"]}/reset-password?email={dto.Email}&token={Uri.EscapeDataString(token)}";
+
+            var subject = "FlowOS Password Reset";
+            var body = $@"
+                        <h2>Reset your FlowOS password</h2>
+                        <p>Click the link below to reset your password:</p>
+                        <a href='{resetLink}'>{resetLink}</a>
+                        <br/><br/>
+                        <p>If you didn’t request this, please ignore this email.</p>";
+
+            await _emailService.SendEmailAsync(dto.Email, subject, body);
+
+            return Ok(new { message = "Password reset link sent if email exists." });
+        }
+
+        [HttpPost("reset-password")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto dto)
+        {
+            var user = await _userManager.FindByEmailAsync(dto.Email);
+            if (user == null)
+                return BadRequest(new { message = "Invalid email" });
+
+            var result = await _userManager.ResetPasswordAsync(user, dto.Token, dto.NewPassword);
+
+            if (!result.Succeeded)
+                return BadRequest(result.Errors);
+
+            // Optional: revoke refresh tokens if you want to invalidate old sessions
+            var tokens = _context.UserRefreshTokens.Where(t => t.UserId == user.Id && t.RevokedAt == null);
+            foreach (var t in tokens) t.RevokedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Password reset successful." });
+        }
+
         // ✅ GET /auth/me
         [HttpGet("me")]
         public IActionResult Me()
@@ -209,6 +215,21 @@ namespace FlowOS.Api.Controllers
                 id,
                 name,
                 email
+            });
+        }
+
+        [HttpGet("env-check")]
+        public IActionResult GetEnvCheck()
+        {
+            var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+            var key = _config["Jwt:Key"]?.Substring(0, 10);
+            var conn = _config.GetConnectionString("DefaultConnection");
+
+            return Ok(new
+            {
+                environment = env,
+                jwtKeyStart = key,
+                connection = conn
             });
         }
     }

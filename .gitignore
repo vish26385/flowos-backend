@@ -20,6 +20,7 @@ obj/
 # Secrets
 appsettings.Development.json
 appsettings.Local.json
+appsettings.Production.json
 
 # Publish outputs
 publish/

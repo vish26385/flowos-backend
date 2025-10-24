@@ -148,7 +148,8 @@ builder.Services.AddAuthentication(options =>
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
+            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"])),
+        ClockSkew = TimeSpan.Zero
     };
 });
 
@@ -195,6 +196,20 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
+builder.Services.AddScoped<IEmailService, EmailService>();
+
+builder.Services.Configure<IdentityOptions>(options =>
+{
+    options.Password.RequireDigit = true;
+    options.Password.RequiredLength = 8;
+    options.Password.RequireUppercase = true;
+    options.Password.RequireLowercase = true;
+    options.Password.RequireNonAlphanumeric = false;
+
+    options.Lockout.MaxFailedAccessAttempts = 5;
+    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+});
+
 var app = builder.Build();
 
 // ✅ Middleware order (critical)
@@ -220,11 +235,6 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.MapGet("/", () => Results.Ok("✅ FlowOS API running on Azure"));
-//app.MapGet("/test-cors", () =>
-//{
-//    Console.WriteLine("CORS test endpoint hit");
-//    return Results.Ok(new { message = "CORS is working ✅" });
-//});
 
 app.Run();
 
