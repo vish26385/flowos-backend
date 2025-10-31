@@ -41,7 +41,7 @@ namespace FlowOS.Api.Services
                 issuer: jwtSection["Issuer"],
                 audience: jwtSection["Audience"],
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(1),
+                expires: DateTime.UtcNow.AddMinutes(15),
                 signingCredentials: creds
             );
 

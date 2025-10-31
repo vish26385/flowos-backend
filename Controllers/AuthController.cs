@@ -164,7 +164,7 @@ namespace FlowOS.Api.Controllers
             var token = await _userManager.GeneratePasswordResetTokenAsync(user);
 
             // Build reset link
-            var resetLink = $"{_config["ClientBaseUrl"]}/reset-password?email={dto.Email}&token={Uri.EscapeDataString(token)}";
+            var resetLink = $"{_config["ClientBaseUrl"]}/reset?email={dto.Email}&token={Uri.EscapeDataString(token)}";
 
             var subject = "FlowOS Password Reset";
             var body = $@"
