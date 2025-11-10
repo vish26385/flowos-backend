@@ -14,5 +14,8 @@
         // Foreign key to Identity User (string Id)
         public string UserId { get; set; } = string.Empty;
         public ApplicationUser? User { get; set; }
+        public int? EstimatedMinutes { get; set; }   // default to 30 if null
+
+        public string? EnergyLevel { get; set; } // "low" | "medium" | "high"
     }
 }

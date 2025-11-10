@@ -3,6 +3,7 @@ using System;
 using FlowOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FlowOS.Api.Migrations
 {
     [DbContext(typeof(FlowOSContext))]
-    partial class FlowOSContextModelSnapshot : ModelSnapshot
+    [Migration("20251101103319_AddWorkHoursToUser")]
+    partial class AddWorkHoursToUser
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -34,10 +37,6 @@ namespace FlowOS.Api.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("text");
 
-                    b.Property<string>("CurrentTone")
-                        .IsRequired()
-                        .HasColumnType("text");
-
                     b.Property<string>("Email")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
@@ -48,9 +47,6 @@ namespace FlowOS.Api.Migrations
                     b.Property<string>("FullName")
                         .IsRequired()
                         .HasColumnType("text");
-
-                    b.Property<DateTime?>("LastToneChangeDate")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("LockoutEnabled")
                         .HasColumnType("boolean");
@@ -75,14 +71,8 @@ namespace FlowOS.Api.Migrations
                     b.Property<bool>("PhoneNumberConfirmed")
                         .HasColumnType("boolean");
 
-                    b.Property<string>("PreferredTone")
-                        .HasColumnType("text");
-
                     b.Property<string>("SecurityStamp")
                         .HasColumnType("text");
-
-                    b.Property<int>("ToneConfidence")
-                        .HasColumnType("integer");
 
                     b.Property<bool>("TwoFactorEnabled")
                         .HasColumnType("boolean");
@@ -126,13 +116,8 @@ namespace FlowOS.Api.Migrations
                     b.Property<DateTime>("GeneratedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("ModelUsed")
-                        .HasColumnType("text");
-
-                    b.Property<string>("PlanJsonClean")
-                        .HasColumnType("text");
-
-                    b.Property<string>("PlanJsonRaw")
+                    b.Property<string>("PlanJson")
+                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("Tone")
@@ -145,8 +130,7 @@ namespace FlowOS.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "Date")
-                        .IsUnique();
+                    b.HasIndex("UserId");
 
                     b.ToTable("DailyPlans");
                 });
@@ -240,9 +224,6 @@ namespace FlowOS.Api.Migrations
                     b.Property<DateTime>("DueDate")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("EnergyLevel")
-                        .HasColumnType("text");
-
                     b.Property<int?>("EstimatedMinutes")
                         .HasColumnType("integer");
 
@@ -262,48 +243,6 @@ namespace FlowOS.Api.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("Tasks");
-                });
-
-            modelBuilder.Entity("FlowOS.Api.Models.ToneHistory", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("AppliedTone")
-                        .HasColumnType("text");
-
-                    b.Property<int>("ConfidenceDelta")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("Date")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("EmotionalScore")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(400)
-                        .HasColumnType("character varying(400)");
-
-                    b.Property<int>("PerformanceScore")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("SuggestedTone")
-                        .HasColumnType("text");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "Date")
-                        .IsUnique();
-
-                    b.ToTable("ToneHistories");
                 });
 
             modelBuilder.Entity("FlowOS.Api.Models.UserRefreshToken", b =>

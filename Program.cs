@@ -1,6 +1,8 @@
-﻿//using FlowOS.Api.Data;
+﻿//using FlowOS.Api.Configurations;
+//using FlowOS.Api.Data;
 //using FlowOS.Api.Models;
 //using FlowOS.Api.Services;
+//using FlowOS.Api.Services.Planner;
 //using Microsoft.AspNetCore.Authentication.JwtBearer;
 //using Microsoft.AspNetCore.HttpOverrides;
 //using Microsoft.AspNetCore.Identity;
@@ -11,16 +13,16 @@
 
 //var builder = WebApplication.CreateBuilder(args);
 
-//// ✅ 1. Database connection
+//// ✅ Database
 //builder.Services.AddDbContext<FlowOSContext>(options =>
 //    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-//// ✅ 2. Identity
+//// ✅ Identity
 //builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
 //    .AddEntityFrameworkStores<FlowOSContext>()
 //    .AddDefaultTokenProviders();
 
-//// ✅ 3. JWT Authentication
+//// ✅ JWT
 //builder.Services.AddAuthentication(options =>
 //{
 //    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -35,11 +37,25 @@
 //        ValidateLifetime = true,
 //        ValidateIssuerSigningKey = true,
 //        IssuerSigningKey = new SymmetricSecurityKey(
-//            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
+//            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"])),
+//        ClockSkew = TimeSpan.Zero
 //    };
 //});
 
-//// ✅ 4. Controllers + Swagger
+//// ✅ CORS (handles Expo tunnels + Azure)
+//builder.Services.AddCors(options =>
+//{
+//    options.AddPolicy("AllowAll",
+//        policy =>
+//        {
+//            policy
+//            .AllowAnyOrigin()   // allow all origins (works fine since no credentials used)
+//            .AllowAnyHeader()
+//            .AllowAnyMethod();
+//        });
+//});
+
+//// ✅ Swagger
 //builder.Services.AddScoped<TokenService>();
 //builder.Services.AddControllers();
 //builder.Services.AddEndpointsApiExplorer();
@@ -47,14 +63,13 @@
 //{
 //    c.SwaggerDoc("v1", new OpenApiInfo { Title = "FlowOS API", Version = "v1" });
 
-//    // JWT setup in Swagger
 //    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
 //    {
 //        Type = SecuritySchemeType.Http,
 //        Scheme = "bearer",
 //        BearerFormat = "JWT",
 //        In = ParameterLocation.Header,
-//        Description = "Enter your JWT token in the text box below.",
+//        Description = "Enter JWT token"
 //    });
 
 //    c.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -62,78 +77,120 @@
 //        {
 //            new OpenApiSecurityScheme
 //            {
-//                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+//                Reference = new OpenApiReference
+//                { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
 //            },
 //            new string[]{}
 //        }
 //    });
 //});
 
-////// ✅ 5. Allow all CORS for testing
-////builder.Services.AddCors(options =>
-////{
-////    options.AddPolicy("AllowAll", policy =>
-////    {
-////        policy.AllowAnyOrigin()
-////              .AllowAnyHeader()
-////              .AllowAnyMethod();
-////    });
-////});
+//builder.Services.AddScoped<IEmailService, EmailService>();
+//builder.Services.AddScoped<IPlannerService, PlannerService>();
+
+//builder.Services.AddHttpClient();
+//builder.Services.Configure<OpenAISettings>(builder.Configuration.GetSection("OpenAI"));
+
+//var useOpenAI = builder.Configuration.GetValue<bool>("Planner:UseOpenAI");
+
+//if (useOpenAI)
+//{
+//    builder.Services.AddScoped<OpenAIPlannerService>();
+//    // HttpClient for OpenAIPlannerService (if not already)
+//    builder.Services.AddHttpClient<OpenAIPlannerService>();
+//}
+//else
+//{
+//    builder.Services.AddScoped<IPlannerService, PlannerService>(); // Mock
+//}
+
+//builder.Services.Configure<IdentityOptions>(options =>
+//{
+//    options.Password.RequireDigit = true;
+//    options.Password.RequiredLength = 8;
+//    options.Password.RequireUppercase = true;
+//    options.Password.RequireLowercase = true;
+//    options.Password.RequireNonAlphanumeric = false;
+
+//    options.Lockout.MaxFailedAccessAttempts = 5;
+//    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+//});
 
 //var app = builder.Build();
 
-//// ✅ 6. Forward headers (for reverse proxies like Azure)
+//// ✅ Middleware order (critical)
 //app.UseForwardedHeaders(new ForwardedHeadersOptions
 //{
 //    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
 //});
 
-//// ✅ 7. Always enable Swagger (even in production)
 //app.UseSwagger();
 //app.UseSwaggerUI(c =>
 //{
 //    c.SwaggerEndpoint("/swagger/v1/swagger.json", "FlowOS API v1");
-//    c.RoutePrefix = "swagger"; // keep swagger at /swagger
+//    c.RoutePrefix = "swagger";
 //});
 
-//// ✅ 8. Root URL returns something (no more 404)
-//app.MapGet("/", () => Results.Ok("✅ FlowOS API is running on Azure!"));
-
-//// ✅ 9. Middleware order
 //app.UseHttpsRedirection();
+
 //app.UseRouting();
-//app.UseCors("AllowAll");
+//app.UseCors("AllowAll");       // ⚠️ Must come *after* UseRouting and *before* Auth
 //app.UseAuthentication();
 //app.UseAuthorization();
 
-//// ✅ 10. Map controllers
 //app.MapControllers();
+
+//app.MapGet("/", () => Results.Ok("✅ FlowOS API running on Azure"));
 
 //app.Run();
 
+using FlowOS.Api.Configurations;
 using FlowOS.Api.Data;
 using FlowOS.Api.Models;
 using FlowOS.Api.Services;
+using FlowOS.Api.Services.Planner;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using OpenAI; // ✅ Official SDK
+using System.ClientModel;
 using System.Text;
+// using OpenAI.Chat; // (If you reference typed Chat client elsewhere)
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ✅ Database
+// ---------------------------
+// 1) Database
+// ---------------------------
 builder.Services.AddDbContext<FlowOSContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// ✅ Identity
+// ---------------------------
+// 2) Identity
+// ---------------------------
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
     .AddEntityFrameworkStores<FlowOSContext>()
     .AddDefaultTokenProviders();
 
-// ✅ JWT
+builder.Services.Configure<IdentityOptions>(options =>
+{
+    options.Password.RequireDigit = true;
+    options.Password.RequiredLength = 8;
+    options.Password.RequireUppercase = true;
+    options.Password.RequireLowercase = true;
+    options.Password.RequireNonAlphanumeric = false;
+
+    options.Lockout.MaxFailedAccessAttempts = 5;
+    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+});
+
+// ---------------------------
+// 3) JWT Auth
+// ---------------------------
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -148,26 +205,28 @@ builder.Services.AddAuthentication(options =>
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"])),
+            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)),
         ClockSkew = TimeSpan.Zero
     };
 });
 
-// ✅ CORS (handles Expo tunnels + Azure)
+// ---------------------------
+// 4) CORS (Expo / Web / Mobile)
+// ---------------------------
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll",
-        policy =>
-        {
-            policy
-            .AllowAnyOrigin()   // allow all origins (works fine since no credentials used)
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy
+            .AllowAnyOrigin()   // Safe because you're not using cookies/credentials
             .AllowAnyHeader()
             .AllowAnyMethod();
-        });
+    });
 });
 
-// ✅ Swagger
-builder.Services.AddScoped<TokenService>();
+// ---------------------------
+// 5) Controllers + Swagger
+// ---------------------------
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -188,36 +247,73 @@ builder.Services.AddSwaggerGen(c =>
         {
             new OpenApiSecurityScheme
             {
-                Reference = new OpenApiReference
-                { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
             },
-            new string[]{}
+            Array.Empty<string>()
         }
     });
 });
 
+// ---------------------------
+// 6) App Services
+// ---------------------------
+builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 
-builder.Services.Configure<IdentityOptions>(options =>
-{
-    options.Password.RequireDigit = true;
-    options.Password.RequiredLength = 8;
-    options.Password.RequireUppercase = true;
-    options.Password.RequireLowercase = true;
-    options.Password.RequireNonAlphanumeric = false;
+// Orchestrator visible to the app:
+builder.Services.AddScoped<IPlannerService, PlannerService>();
 
-    options.Lockout.MaxFailedAccessAttempts = 5;
-    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+// Concrete AI engine (partial class files) — always add
+// (PlannerService will call it; config may decide behavior inside)
+builder.Services.AddScoped<OpenAIPlannerService>();
+
+// HttpClient for any REST the AI service might perform
+builder.Services.AddHttpClient<OpenAIPlannerService>();
+
+// ---------------------------
+// 7) Settings Binding
+// ---------------------------
+builder.Services.Configure<OpenAISettings>(builder.Configuration.GetSection("OpenAI"));
+var useOpenAI = builder.Configuration.GetValue<bool>("Planner:UseOpenAI");
+
+// ---------------------------
+// 8) OpenAI SDK Client (OC1)
+// ---------------------------
+// We register the official OpenAIClient as a singleton.
+// It uses OpenAISettings.ApiKey (and optional Organization).
+builder.Services.AddSingleton(sp =>
+{
+    var settings = sp.GetRequiredService<IOptions<OpenAISettings>>().Value;
+
+    if (string.IsNullOrWhiteSpace(settings.ApiKey))
+    {
+        if (useOpenAI)
+            throw new InvalidOperationException("❌ OpenAI:ApiKey is missing in configuration.");
+
+        // If AI disabled, return a dummy client
+        // (We avoid null so DI still works, but this client should not be used)
+        return new OpenAIClient(new ApiKeyCredential("DUMMY_KEY"));
+    }
+
+    var opts = new OpenAIClientOptions();
+    return new OpenAIClient(new ApiKeyCredential(settings.ApiKey!), opts);
 });
 
+// You may also want IHttpClientFactory generally:
+builder.Services.AddHttpClient();
+
+// ---------------------------
+// 9) App Pipeline
+// ---------------------------
 var app = builder.Build();
 
-// ✅ Middleware order (critical)
+// Trust X-Forwarded-* (Azure/AppGW/NGINX)
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
 });
 
+// Swagger
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -228,13 +324,16 @@ app.UseSwaggerUI(c =>
 app.UseHttpsRedirection();
 
 app.UseRouting();
-app.UseCors("AllowAll");       // ⚠️ Must come *after* UseRouting and *before* Auth
+app.UseCors("AllowAll");   // between UseRouting and Auth
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 
-app.MapGet("/", () => Results.Ok("✅ FlowOS API running on Azure"));
+// Simple health root
+app.MapGet("/", () => Results.Ok("✅ FlowOS API running"));
 
+// ---------------------------
+// 10) Run
+// ---------------------------
 app.Run();
-
