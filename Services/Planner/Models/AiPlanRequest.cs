@@ -4,7 +4,7 @@
     /// Wrapper for all inputs the AI planner needs to generate a day plan.
     /// Using a single request object keeps the AI API stable as we add more signals (mood, weather, meetings).
     /// </summary>
-    public class AiPlanRequest
+    public record AiPlanRequest
     {
         #region Properties
 
@@ -39,6 +39,8 @@
         /// Default = false.
         /// </summary>
         public bool ForceRegenerate { get; init; } = false;
+
+        public DateTime StartedAt { get; init; } = DateTime.UtcNow;
 
         #endregion
     }

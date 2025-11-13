@@ -1,4 +1,5 @@
 ﻿using FlowOS.Api.Models;
+using FlowOS.Api.Models.Audit;
 using FlowOS.Api.Models.Enums;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,8 @@ namespace FlowOS.Api.Data
         public DbSet<NudgeFeedback> NudgeFeedback { get; set; }
 
         public DbSet<ToneHistory> ToneHistories => Set<ToneHistory>();
+
+        public DbSet<AiPlanAudit> AiPlanAudits { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

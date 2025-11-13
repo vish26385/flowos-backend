@@ -408,25 +408,26 @@
 //}
 #endregion
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.ClientModel;                       // ClientResult<T>, ClientResultException, ApiKeyCredential
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using OpenAI;
-using OpenAI.Chat;
-using FlowOS.Api.Services.Planner.Models;       // AiPlanTimelineItem, DailyPlanAiResult
 using FlowOS.Api.DTOs.Plan;
 using FlowOS.Api.Models;
+using FlowOS.Api.Services.Planner.Models;       // AiPlanTimelineItem, DailyPlanAiResult
 using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json.Linq;          // Fallback parser
+using OpenAI;
+using OpenAI.Chat;
 using System;
+using System;
+using System.ClientModel;                       // ClientResult<T>, ClientResultException, ApiKeyCredential
 using System.Collections.Generic;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Linq;
 using System.Net.Http; 
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
-using Newtonsoft.Json.Linq;          // Fallback parser
+using System.Text.Json.Serialization;
 
 namespace FlowOS.Api.Services.Planner
 {
@@ -454,7 +455,7 @@ namespace FlowOS.Api.Services.Planner
                 new AssistantChatMessage(rulesPrompt),
                 new UserChatMessage(userPrompt)
             };
-
+           
             // SDK 2.6.0 signature: (name, jsonSchema, description?, strict?)
             var responseFormat = ChatResponseFormat.CreateJsonSchemaFormat(
                 "flowos_daily_plan",
@@ -471,8 +472,14 @@ namespace FlowOS.Api.Services.Planner
 
             try
             {
-                //var result = await chat.CompleteAsync(messages, options).ConfigureAwait(false);
+                var sw = Stopwatch.StartNew();
                 var result = await chat.CompleteChatAsync(messages, options).ConfigureAwait(false);
+                sw.Stop();
+                _logger?.LogInformation(
+                    "⏱️ AI call completed in {Elapsed} ms using model {Model}",
+                    sw.ElapsedMilliseconds,
+                    model
+                );
                 var completion = result.Value;
 
                 string raw = "{}";
@@ -568,6 +575,10 @@ namespace FlowOS.Api.Services.Planner
                 var tone = NormalizeTone(j.Value<string>("tone"));
                 var focus = j.Value<string>("focus") ?? string.Empty;
 
+                focus = string.IsNullOrWhiteSpace(focus)
+                        ? "Focus your energy today."
+                        : focus.Length > 140 ? focus[..140] : focus;
+
                 var items = new List<AiPlanTimelineItem>();
                 var itemsToken = j["items"] as Newtonsoft.Json.Linq.JArray;
                 if (itemsToken != null)
@@ -599,7 +610,15 @@ namespace FlowOS.Api.Services.Planner
                     }
                 }
 
+                if (items == null || items.Count == 0)
+                {
+                    _logger?.LogWarning("AI_PLAN_NO_TIMELINE: substituting fallback plan.");
+                    return EmptyResult(rawJson);
+                }
+
                 var carry = new List<int>();
+                if (string.IsNullOrWhiteSpace(tone))
+                    tone = "balanced";
                 var carryToken = j["carryOverTaskIds"] as Newtonsoft.Json.Linq.JArray;
                 if (carryToken != null)
                 {
@@ -624,6 +643,26 @@ namespace FlowOS.Api.Services.Planner
                     new JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase, WriteIndented = false }
                 );
 
+                if (items.Count == 0)
+                    _logger?.LogWarning("AI_PARSE_EMPTY_ITEMS: No valid timeline items found.");
+
+                if (items == null || items.Count == 0)
+                {
+                    _logger?.LogWarning("AI_PLAN_EMPTY_ITEMS: Falling back to default placeholder block.");
+
+                    items = new List<AiPlanTimelineItem>
+                    {
+                        new AiPlanTimelineItem
+                        {
+                            Label = "Plan your day manually",
+                            Start = DateTime.UtcNow,
+                            End = DateTime.UtcNow.AddMinutes(30),
+                            Confidence = 1,
+                            NudgeAt = DateTime.UtcNow.AddMinutes(5)
+                        }
+                    };
+                }
+
                 return new DailyPlanAiResult
                 {
                     Tone = tone,
@@ -638,7 +677,7 @@ namespace FlowOS.Api.Services.Planner
             {
                 _logger?.LogError(ex2, "AI_PARSE_NEWTONSOFT_FAILED");
             }
-
+         
             return EmptyResult(rawJson);
         }
 
@@ -647,11 +686,20 @@ namespace FlowOS.Api.Services.Planner
         private static DailyPlanAiResult EmptyResult(string raw) => new DailyPlanAiResult
         {
             Tone = "balanced",
-            Focus = string.Empty,
+            Focus = "Your day plan could not be generated.",
             RawJson = raw ?? string.Empty,
             CleanJson = "{\"tone\":\"balanced\",\"focus\":\"\",\"items\":[],\"carryOverTaskIds\":[]}",
-            Timeline = new(),
-            CarryOverTaskIds = new()
+            Timeline = new List<AiPlanTimelineItem>
+            {
+                new AiPlanTimelineItem
+                {
+                    Label = "Manual Planning Required",
+                    Start = DateTime.UtcNow,
+                    End = DateTime.UtcNow.AddMinutes(30),
+                    Confidence = 1
+                }
+            },
+            CarryOverTaskIds = new List<int>()
         };
 
         private sealed class StjRoot

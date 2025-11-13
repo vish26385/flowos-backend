@@ -1,34 +1,7 @@
 ﻿using FlowOS.Api.Models;
 
 namespace FlowOS.Api.Services.Planner.Models
-{
-    //public class DailyPlanAiResult
-    //{
-    //    public string Tone { get; set; } = "balanced";
-    //    public string Focus { get; set; } = string.Empty;
-
-    //    // Raw JSON from AI before cleanup
-    //    public string RawJson { get; set; } = string.Empty;
-
-    //    // Clean JSON used for UI & DB storage
-    //    public string CleanJson { get; set; } = string.Empty;
-
-    //    // Timeline blocks of the day
-    //    public List<DailyPlanAiItem> Timeline { get; set; } = new();
-
-    //    // Tasks not scheduled today (for tomorrow or later)
-    //    public List<int> CarryOverTaskIds { get; set; } = new();
-    //}
-    //public class DailyPlanAiItem
-    //{
-    //    public int? TaskId { get; set; }
-    //    public string Label { get; set; } = string.Empty;
-    //    public DateTime Start { get; set; }
-    //    public DateTime End { get; set; }
-    //    public int Confidence { get; set; } = 3;
-    //    public DateTime? NudgeAt { get; set; }
-    //}
-
+{   
     /// <summary>
     /// Rich AI output returned by the OpenAI planner engine.
     /// This is NOT the API DTO and NOT the EF entity — it is an internal result model.

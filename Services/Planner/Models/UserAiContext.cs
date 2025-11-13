@@ -8,6 +8,7 @@
     {
         #region Properties
 
+        public string Id { get; init; } = string.Empty;   // <-- Add this
         /// <summary>
         /// User's first name used for friendly, personalized tone ("Good morning, Vishnu!").
         /// </summary>

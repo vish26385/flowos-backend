@@ -505,14 +505,17 @@ namespace FlowOS.Api.Services.Planner
 
             // --- Build prompts & schema (RP-E) ---
             var (systemPrompt, userPrompt, rulesPrompt) = BuildPrompt(request);
-            var schema = GetPlanResponseJsonSchema();
+            var planSchema = GetPlanResponseJsonSchema();
+            #if DEBUG
+                JsonDocument.Parse(planSchema);
+            #endif
 
             // --- Model choice (MS2-Balanced / U2) ---
             var (primaryModel, premiumModel, shouldTryUpgrade) = SelectModelsU2(request);
 
             // First attempt with the base model
             var usedModel = primaryModel;
-            string raw = await CallOpenAiForPlanAsync(usedModel, systemPrompt, userPrompt, rulesPrompt, schema);
+            string raw = await CallOpenAiForPlanAsync(usedModel, systemPrompt, userPrompt, rulesPrompt, planSchema);
             var parsed = ParseAiPlanResponse(raw);
 
             // Heuristic to judge “underfilled/weak” output
@@ -526,13 +529,13 @@ namespace FlowOS.Api.Services.Planner
                 _logger.LogInformation("AI_PLAN_UPGRADE_DECISION: upgrading model from {Base} to {Pro} (tasks={Tasks}, tone={Tone})",
                     primaryModel, premiumModel, request.Tasks.Count, request.Tone);
 
-#pragma warning disable CS0219
-                // (kept for clarity if you later log token usage per attempt)
-                int attempt = 1;
-#pragma warning restore CS0219
+                #pragma warning disable CS0219
+                    // (kept for clarity if you later log token usage per attempt)
+                    int attempt = 1;
+                #pragma warning restore CS0219
 
                 usedModel = premiumModel;
-                var raw2 = await CallOpenAiForPlanAsync(usedModel, systemPrompt, userPrompt, rulesPrompt, schema);
+                var raw2 = await CallOpenAiForPlanAsync(usedModel, systemPrompt, userPrompt, rulesPrompt, planSchema);
                 var parsed2 = ParseAiPlanResponse(raw2);
 
                 // Prefer result that actually produced a non-empty / larger timeline

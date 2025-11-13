@@ -1,14 +1,16 @@
 ﻿#region old commented code
-using System.Diagnostics;
-using System.Text.Json;
 using FlowOS.Api.Data;
 using FlowOS.Api.DTOs.Plan;
 using FlowOS.Api.Models;
+using FlowOS.Api.Models.Audit;
 using FlowOS.Api.Models.Enums;            // ← PlanTone enum
 using FlowOS.Api.Services.Planner;
+using FlowOS.Api.Services.Planner.Helpers;
 using FlowOS.Api.Services.Planner.Models; // AiPlanRequest, UserAiContext, TaskAiContext, DailyPlanAiResult
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;       // ← ensure logging namespace
+using System.Diagnostics;
+using System.Text.Json;
 
 namespace FlowOS.Api.Services.Planner
 {
@@ -25,6 +27,11 @@ namespace FlowOS.Api.Services.Planner
         private readonly FlowOSContext _context;
         private readonly OpenAIPlannerService _aiPlanner; // Hybrid DI (concrete for OpenAI features)
         private readonly ILogger<PlannerService> _logger;
+
+        // Thresholds for auto re-generation
+        private const double MinConfidenceThreshold = 3.0;   // average AI confidence
+        private const double MinCoverageThreshold = 60.0;    // % of workday covered
+        private const double MinAlignedThreshold = 50.0;    // % of tasks planned
 
         public PlannerService(
             FlowOSContext context,
@@ -74,9 +81,17 @@ namespace FlowOS.Api.Services.Planner
             var toneForThisPlanEnum = user.PreferredTone ?? user.CurrentTone; // Preferred wins; else current
             var toneForThisPlanStr = (toneOverride ?? ToneToAiString(toneForThisPlanEnum)).Trim().ToLowerInvariant();
 
+            var localDay = DateTime.SpecifyKind(day.Date, DateTimeKind.Local);
+            var startUtc = localDay.ToUniversalTime();
+            var endUtc = startUtc.AddDays(1);
+
             // Pull candidate tasks for this day (pending only)
             var dbTasks = await _context.Tasks
-                .Where(t => t.UserId == userId && !t.Completed && t.DueDate.Date == day)
+                .Where(t => t.UserId == userId 
+                   && !t.Completed
+                   && t.DueDate >= startUtc
+                   && t.DueDate < endUtc
+                   )
                 .OrderByDescending(t => t.Priority)
                 .ToListAsync();
 
@@ -96,6 +111,7 @@ namespace FlowOS.Api.Services.Planner
                 UserId = userId,
                 User = new UserAiContext
                 {
+                    Id = userId,
                     FirstName = firstName,
                     FullName = user.FullName,
                     WorkStart = workStart,
@@ -112,6 +128,113 @@ namespace FlowOS.Api.Services.Planner
             // --- Step 2: Call AI engine (OpenAIPlannerService handles retries/fallbacks) ---
             var swAi = Stopwatch.StartNew();
             DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
+
+            var metrics = AiPlanQualityAnalyzer.Analyze(aiResult, aiRequest.Tasks.Count);
+
+            bool shouldRegenerate =
+                metrics.AvgConfidence < MinConfidenceThreshold ||
+                metrics.CoveragePercent < MinCoverageThreshold ||
+                metrics.AlignedTasksPercent < MinAlignedThreshold;
+
+            if (shouldRegenerate)
+            {
+                _logger.LogWarning(
+                    "⚠️ AI plan quality below threshold | Confidence={0} | Coverage={1}% | Aligned={2}% — retrying once.",
+                    metrics.AvgConfidence, metrics.CoveragePercent, metrics.AlignedTasksPercent
+                );
+
+                try
+                {
+                    // Force regenerate with upgraded model or stricter rules
+                    var retryRequest = aiRequest with { ForceRegenerate = true };
+                    var retryResult = await _aiPlanner.GenerateAiPlanAsync(retryRequest);
+                    var retryMetrics = AiPlanQualityAnalyzer.Analyze(retryResult, aiRequest.Tasks.Count);
+
+                    if (retryMetrics.AvgConfidence >= MinConfidenceThreshold &&
+                        retryMetrics.CoveragePercent >= MinCoverageThreshold)
+                    {
+                        _logger.LogInformation("✅ Regeneration successful: plan quality improved to acceptable levels.");
+                        aiResult = retryResult;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("⚠️ Regeneration did not sufficiently improve quality. Keeping original plan.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "AI plan regeneration attempt failed.");
+                }
+            }
+
+            var audit = new AiPlanAudit
+            {
+                UserId = aiRequest.User.Id,
+                RequestedAt = aiRequest.StartedAt,
+                CompletedAt = DateTime.UtcNow,
+                LatencyMs = (long)(DateTime.UtcNow - aiRequest.StartedAt).TotalMilliseconds,
+
+                ModelUsed = aiResult.ModelUsed ?? "unknown",
+                WasRegenerated = shouldRegenerate,
+
+                AvgConfidence = metrics.AvgConfidence,
+                CoveragePercent = metrics.CoveragePercent,
+                AlignedTasksPercent = metrics.AlignedTasksPercent,
+                OverlapCount = metrics.OverlapCount,
+
+                RawJson = aiResult.RawJson ?? "",
+                CleanJson = aiResult.CleanJson ?? "",
+
+                Notes = metrics.Notes
+            };
+
+            _context.AiPlanAudits.Add(audit);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "📊 AI PLAN QUALITY | Confidence={AvgConfidence} | Coverage={Coverage}% | Aligned={Aligned}% | Overlaps={Overlaps} | Items={Items} | Status={Status}",
+                metrics.AvgConfidence,
+                metrics.CoveragePercent,
+                metrics.AlignedTasksPercent,
+                metrics.OverlapCount,
+                aiResult.Timeline.Count,
+                metrics.Status
+            );
+
+            if (metrics.AvgConfidence < 2.5 || metrics.CoveragePercent < 50)
+            {
+                _logger.LogWarning("⚠️ Low AI plan quality detected. Consider re-generating.");
+            }
+
+            if (aiResult == null || aiResult.Timeline.Count == 0)
+            {
+                _logger.LogWarning("⚠️ AI returned empty or invalid plan — using fallback.");
+                aiResult = new DailyPlanAiResult
+                {
+                    Tone = "balanced",
+                    Focus = "Fallback plan for today.",
+                    Timeline = new List<AiPlanTimelineItem>
+                    {
+                        new AiPlanTimelineItem
+                        {
+                            Label = "Manual Planning Required",
+                            Start = DateTime.UtcNow,
+                            End = DateTime.UtcNow.AddMinutes(30),
+                            Confidence = 1
+                        }
+                    }
+                };
+            }
+
+            _logger.LogInformation(
+                "✅ AI Plan Generated | Model={ModelUsed} | Tasks={ItemCount}\nTone={Tone}\nFocus={Focus}\nRawJsonLength={Len}",
+                aiResult?.ModelUsed ?? "(unknown)",
+                aiResult?.Timeline?.Count ?? 0,
+                aiResult?.Tone ?? "(none)",
+                aiResult?.Focus ?? "(none)",
+                aiResult?.RawJson?.Length ?? 0
+            );
+
             swAi.Stop();
 
             var rawSizeKb = aiResult.RawJson is null ? 0 : (aiResult.RawJson.Length / 1024.0);
@@ -176,7 +299,7 @@ namespace FlowOS.Api.Services.Planner
                         .Select(i => new DailyPlanItem
                         {
                             PlanId = plan.Id,
-                            TaskId = i.TaskId,
+                            TaskId = i.TaskId, // May be null since AI plan items are not directly mapped to Tasks
                             Label = i.Label,
                             Start = EnsureUtc(i.Start),
                             End = EnsureUtc(i.End),

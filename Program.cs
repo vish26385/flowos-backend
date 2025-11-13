@@ -1,4 +1,5 @@
-﻿//using FlowOS.Api.Configurations;
+﻿#region old program.cs
+//using FlowOS.Api.Configurations;
 //using FlowOS.Api.Data;
 //using FlowOS.Api.Models;
 //using FlowOS.Api.Services;
@@ -143,6 +144,7 @@
 //app.MapGet("/", () => Results.Ok("✅ FlowOS API running on Azure"));
 
 //app.Run();
+#endregion
 
 using FlowOS.Api.Configurations;
 using FlowOS.Api.Data;
@@ -162,6 +164,9 @@ using System.Text;
 // using OpenAI.Chat; // (If you reference typed Chat client elsewhere)
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ✅ Configure logging level globally
+builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 // ---------------------------
 // 1) Database
@@ -259,6 +264,7 @@ builder.Services.AddSwaggerGen(c =>
 // ---------------------------
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IAuditQueryService, AuditQueryService>();
 
 // Orchestrator visible to the app:
 builder.Services.AddScoped<IPlannerService, PlannerService>();
@@ -274,6 +280,18 @@ builder.Services.AddHttpClient<OpenAIPlannerService>();
 // 7) Settings Binding
 // ---------------------------
 builder.Services.Configure<OpenAISettings>(builder.Configuration.GetSection("OpenAI"));
+builder.Services.AddSingleton(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY")
+                 ?? config["OpenAI:ApiKey"];
+
+    if (string.IsNullOrWhiteSpace(apiKey))
+        throw new InvalidOperationException("Missing OpenAI API key.");
+
+    return new OpenAIClient(apiKey);
+});
+
 var useOpenAI = builder.Configuration.GetValue<bool>("Planner:UseOpenAI");
 
 // ---------------------------

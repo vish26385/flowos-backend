@@ -542,82 +542,232 @@ Tasks (sorted by priority desc, then due asc):
         /// <see cref=""DailyPlanAiResult""/> format (timeline, carryover tasks, tone, focus, etc.).
         /// </summary>
         /// <returns>A string containing the JSON Schema definition for the AI response.</returns>
-        private string GetPlanResponseJsonSchema()
+
+        #region GetPlanResponseJsonSchema old
+        //private string GetPlanResponseJsonSchema()
+        //{
+        //    return @"
+        //    {
+        //      ""type"": ""object"",
+        //      ""$id"": ""https://schemas.flowos.app/plan/flowos_daily_plan.json"",
+        //      ""$schema"": ""https://json-schema.org/draft/2020-12/schema"",
+        //      ""title"": ""flowos_daily_plan"",
+        //      ""description"": ""Structured response for FlowOS daily planning"",
+        //      ""additionalProperties"": false,
+        //      ""properties"": {
+        //        ""tone"": {
+        //          ""type"": ""string"",
+        //          ""enum"": [""soft"", ""strict"", ""playful"", ""balanced""],
+        //          ""description"": ""Final tone applied to the plan.""
+        //        },
+        //        ""focus"": {
+        //          ""type"": ""string"",
+        //          ""minLength"": 3,
+        //          ""maxLength"": 140,
+        //          ""description"": ""Single concise sentence describing the day’s main intent.""
+        //        },
+        //        //""items"": {
+        //        //  ""type"": ""array"",
+        //        //  ""items"": {
+        //        //    ""type"": ""object"",
+        //        //    ""additionalProperties"": false,
+        //        //    ""properties"": {
+        //        //      ""label"": {
+        //        //        ""type"": ""string"",
+        //        //        ""minLength"": 2,
+        //        //        ""maxLength"": 60,
+        //        //        ""description"": ""Short (2–5 words) starting with a verb. No emojis/markdown/punctuation.""
+        //        //      },
+        //        //      ""start"": {
+        //        //        ""type"": ""string"",
+        //        //        ""format"": ""date-time"",
+        //        //        ""pattern"": ""^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:(?:\\d{2}|\\d{2}\\.\\d+)Z$"",
+        //        //        ""description"": ""Start time in ISO-8601 UTC (Z). Example: 2025-10-26T09:00:00Z""
+        //        //      },
+        //        //      ""end"": {
+        //        //        ""type"": ""string"",
+        //        //        ""format"": ""date-time"",
+        //        //        ""pattern"": ""^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:(?:\\d{2}|\\d{2}\\.\\d+)Z$"",
+        //        //        ""description"": ""End time in ISO-8601 UTC (Z). Must be > start.""
+        //        //      },
+        //        //      ""confidence"": {
+        //        //        ""type"": ""integer"",
+        //        //        ""minimum"": 1,
+        //        //        ""maximum"": 5,
+        //        //        ""description"": ""AI confidence for this block's placement (1–5)""
+        //        //      },
+        //        //      ""nudgeAt"": {
+        //        //        //""oneOf"": [
+        //        //        //  { ""type"": ""null"" },
+        //        //        //  { 
+        //        //        //    ""type"": ""string"",
+        //        //        //    ""format"": ""date-time"",
+        //        //        //    ""pattern"": ""^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:(?:\\d{2}|\\d{2}\\.\\d+)Z$"",
+        //        //        //    ""description"": ""UTC timestamp to send a reminder (usually 5–10 min before start)""
+        //        //        //  }
+        //        //        //]
+        //        //        ""type"": [""string"", ""null""],
+        //        //        ""format"": ""date-time"",
+        //        //        ""pattern"": ""^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:(?:\\d{2}|\\d{2}\\.\\d+)Z$"",
+        //        //        ""description"": ""UTC timestamp to send a reminder (usually 5–10 min before start)""
+        //        //      }
+        //        //    },
+        //        //    ""required"": [""label"", ""start"", ""end"", ""confidence""]
+        //        //  }
+        //        //},
+        //        ""items"": {
+        //          ""type"": ""array"",
+        //          ""items"": {
+        //            ""type"": ""object"",
+        //            ""additionalProperties"": false,
+        //            ""properties"": {
+        //              ""label"": {
+        //                ""type"": ""string"",
+        //                ""minLength"": 2,
+        //                ""maxLength"": 60,
+        //                ""description"": ""Short (2–5 words) starting with a verb. No emojis/markdown/punctuation.""
+        //              },
+        //              ""start"": {
+        //                ""type"": ""string"",
+        //                ""format"": ""date-time"",
+        //                ""pattern"": ""^\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:(?:\\\\d{2}|\\\\d{2}\\\\.\\\\d+)Z$"",
+        //                ""description"": ""Start time in ISO-8601 UTC (Z). Example: 2025-10-26T09:00:00Z""
+        //              },
+        //              ""end"": {
+        //                ""type"": ""string"",
+        //                ""format"": ""date-time"",
+        //                ""pattern"": ""^\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:(?:\\\\d{2}|\\\\d{2}\\\\.\\\\d+)Z$"",
+        //                ""description"": ""End time in ISO-8601 UTC (Z). Must be > start.""
+        //              },
+        //              ""confidence"": {
+        //                ""type"": ""integer"",
+        //                ""minimum"": 1,
+        //                ""maximum"": 5,
+        //                ""description"": ""AI confidence for this block's placement (1–5)""
+        //              },
+        //              ""nudgeAt"": {
+        //                ""type"": [""string"", ""null""],
+        //                ""format"": ""date-time"",
+        //                ""pattern"": ""^\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:(?:\\\\d{2}|\\\\d{2}\\\\.\\\\d+)Z$"",
+        //                ""description"": ""UTC timestamp to send a reminder (usually 5–10 min before start)""
+        //              }
+        //            },
+        //            ""required"": [""label"", ""start"", ""end"", ""confidence"", ""nudgeAt""]
+        //          }
+        //        },
+        //        ""carryOverTaskIds"": {
+        //          ""type"": ""array"",
+        //          ""items"": { ""type"": ""integer"" },
+        //          ""description"": ""IDs of tasks not scheduled today that should roll to the next plan (Smart-Carry).""
+        //        }
+        //      },
+        //      ""required"": [""tone"", ""focus"", ""items"", ""carryOverTaskIds""]
+        //    }".Trim();
+        //}
+        #endregion
+
+        // 2.1) Cached copy (built once)
+        private static readonly string _cachedPlanSchema = BuildPlanSchema();
+
+        // 2.2) Public (or private) accessor that callers use
+        private static string GetPlanResponseJsonSchema() => _cachedPlanSchema;
+
+        // 2.3) Static builder that returns a JSON string (safe, no manual escaping)
+        private static string BuildPlanSchema()
         {
-            return @"
+            var schema = new
             {
-              ""type"": ""object"",
-              ""$id"": ""https://schemas.flowos.app/plan/flowos_daily_plan.json"",
-              ""$schema"": ""https://json-schema.org/draft/2020-12/schema"",
-              ""title"": ""flowos_daily_plan"",
-              ""description"": ""Structured response for FlowOS daily planning"",
-              ""additionalProperties"": false,
-              ""properties"": {
-                ""tone"": {
-                  ""type"": ""string"",
-                  ""enum"": [""soft"", ""strict"", ""playful"", ""balanced""],
-                  ""description"": ""Final tone applied to the plan.""
-                },
-                ""focus"": {
-                  ""type"": ""string"",
-                  ""minLength"": 3,
-                  ""maxLength"": 140,
-                  ""description"": ""Single concise sentence describing the day’s main intent.""
-                },
-                ""items"": {
-                  ""type"": ""array"",
-                  ""items"": {
-                    ""type"": ""object"",
-                    ""additionalProperties"": false,
-                    ""properties"": {
-                      ""label"": {
-                        ""type"": ""string"",
-                        ""minLength"": 2,
-                        ""maxLength"": 60,
-                        ""description"": ""Short (2–5 words) starting with a verb. No emojis/markdown/punctuation.""
-                      },
-                      ""start"": {
-                        ""type"": ""string"",
-                        ""format"": ""date-time"",
-                        ""pattern"": ""^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:(?:\\d{2}|\\d{2}\\.\\d+)Z$"",
-                        ""description"": ""Start time in ISO-8601 UTC (Z). Example: 2025-10-26T09:00:00Z""
-                      },
-                      ""end"": {
-                        ""type"": ""string"",
-                        ""format"": ""date-time"",
-                        ""pattern"": ""^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:(?:\\d{2}|\\d{2}\\.\\d+)Z$"",
-                        ""description"": ""End time in ISO-8601 UTC (Z). Must be > start.""
-                      },
-                      ""confidence"": {
-                        ""type"": ""integer"",
-                        ""minimum"": 1,
-                        ""maximum"": 5,
-                        ""description"": ""AI confidence for this block's placement (1–5)""
-                      },
-                      ""nudgeAt"": {
-                        ""oneOf"": [
-                          { ""type"": ""null"" },
-                          { 
-                            ""type"": ""string"",
-                            ""format"": ""date-time"",
-                            ""pattern"": ""^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:(?:\\d{2}|\\d{2}\\.\\d+)Z$"",
-                            ""description"": ""UTC timestamp to send a reminder (usually 5–10 min before start)""
-                          }
-                        ]
-                      }
+                type = "object",
+                @id = "https://schemas.flowos.app/plan/flowos_daily_plan.json",
+                @schema = "https://json-schema.org/draft/2020-12/schema",
+                title = "flowos_daily_plan",
+                description = "Structured response for FlowOS daily planning",
+                additionalProperties = false,
+                properties = new
+                {
+                    tone = new
+                    {
+                        type = "string",
+                        // enum is a reserved word, prefix with @ to allow it
+                        @enum = new[] { "soft", "strict", "playful", "balanced" },
+                        description = "Final tone applied to the plan."
                     },
-                    ""required"": [""label"", ""start"", ""end"", ""confidence""]
-                  }
+                    focus = new
+                    {
+                        type = "string",
+                        minLength = 3,
+                        maxLength = 140,
+                        description = "Single concise sentence describing the day’s main intent."
+                    },
+                    items = new
+                    {
+                        type = "array",
+                        items = new
+                        {
+                            type = "object",
+                            additionalProperties = false,
+                            properties = new
+                            {
+                                label = new
+                                {
+                                    type = "string",
+                                    minLength = 2,
+                                    maxLength = 60,
+                                    description = "Short (2–5 words) starting with a verb. No emojis/markdown/punctuation."
+                                },
+                                start = new
+                                {
+                                    type = "string",
+                                    format = "date-time",
+                                    pattern = @"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:(?:\d{2}|\d{2}\.\d+)Z$",
+                                    description = "Start time in ISO-8601 UTC (Z). Example: 2025-10-26T09:00:00Z"
+                                },
+                                end = new
+                                {
+                                    type = "string",
+                                    format = "date-time",
+                                    pattern = @"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:(?:\d{2}|\d{2}\.\d+)Z$",
+                                    description = "End time in ISO-8601 UTC (Z). Must be > start."
+                                },
+                                confidence = new
+                                {
+                                    type = "integer",
+                                    minimum = 1,
+                                    maximum = 5,
+                                    description = "AI confidence for this block's placement (1–5)"
+                                },
+                                nudgeAt = new
+                                {
+                                    type = new[] { "string", "null" },
+                                    format = "date-time",
+                                    pattern = @"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:(?:\d{2}|\d{2}\.\d+)Z$",
+                                    description = "UTC timestamp to send a reminder (usually 5–10 min before start)"
+                                }
+                            },
+                            required = new[] { "label", "start", "end", "confidence", "nudgeAt" }
+                        }
+                    },
+                    carryOverTaskIds = new
+                    {
+                        type = "array",
+                        items = new { type = "integer" },
+                        description = "IDs of tasks not scheduled today that should roll to the next plan (Smart-Carry)."
+                    }
                 },
-                ""carryOverTaskIds"": {
-                  ""type"": ""array"",
-                  ""items"": { ""type"": ""integer"" },
-                  ""description"": ""IDs of tasks not scheduled today that should roll to the next plan (Smart-Carry).""
-                }
-              },
-              ""required"": [""tone"", ""focus"", ""items"", ""carryOverTaskIds""]
-            }".Trim();
+                required = new[] { "tone", "focus", "items", "carryOverTaskIds" }
+            };
+
+            // Serialize once into compact JSON
+            var json = JsonSerializer.Serialize(schema, new JsonSerializerOptions { WriteIndented = false });
+
+            // Optional: dev-only validation to fail fast if we break schema later
+            #if DEBUG
+                JsonDocument.Parse(json);
+            #endif
+
+            return json;
         }
+
         #endregion
     }
 }
