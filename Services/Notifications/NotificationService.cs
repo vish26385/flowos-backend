@@ -1,0 +1,44 @@
+﻿using FlowOS.Api.Data;
+using FlowOS.Api.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace FlowOS.Api.Services.Notifications
+{
+    public interface INotificationService
+    {
+        System.Threading.Tasks.Task RegisterDeviceAsync(string userId, string expoToken, string platform);
+    }
+
+    public class NotificationService : INotificationService
+    {
+        private readonly FlowOSContext _db;
+
+        public NotificationService(FlowOSContext db)
+        {
+            _db = db;
+        }
+
+        public async System.Threading.Tasks.Task RegisterDeviceAsync(string userId, string expoToken, string platform)
+        {
+            var existing = await _db.UserDeviceTokens
+                .FirstOrDefaultAsync(x => x.ExpoPushToken == expoToken);
+
+            if (existing != null)
+            {
+                existing.IsActive = true;
+                existing.RegisteredAt = DateTime.UtcNow;
+            }
+            else
+            {
+                _db.UserDeviceTokens.Add(new UserDeviceToken
+                {
+                    UserId = userId,
+                    ExpoPushToken = expoToken,
+                    Platform = platform,
+                });
+            }
+
+            await _db.SaveChangesAsync();
+        }
+    }
+}

@@ -150,6 +150,7 @@ using FlowOS.Api.Configurations;
 using FlowOS.Api.Data;
 using FlowOS.Api.Models;
 using FlowOS.Api.Services;
+using FlowOS.Api.Services.Notifications;
 using FlowOS.Api.Services.Planner;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -177,7 +178,10 @@ builder.Services.AddDbContext<FlowOSContext>(options =>
 // ---------------------------
 // 2) Identity
 // ---------------------------
-builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
+builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
+{
+    options.SignIn.RequireConfirmedEmail = false;
+})
     .AddEntityFrameworkStores<FlowOSContext>()
     .AddDefaultTokenProviders();
 
@@ -218,15 +222,25 @@ builder.Services.AddAuthentication(options =>
 // ---------------------------
 // 4) CORS (Expo / Web / Mobile)
 // ---------------------------
+//builder.Services.AddCors(options =>
+//{
+//    options.AddPolicy("AllowAll", policy =>
+//    {
+//        policy
+//            .AllowAnyOrigin()   // Safe because you're not using cookies/credentials
+//            .AllowAnyHeader()
+//            .AllowAnyMethod();
+//    });
+//});
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
-    {
-        policy
-            .AllowAnyOrigin()   // Safe because you're not using cookies/credentials
-            .AllowAnyHeader()
-            .AllowAnyMethod();
-    });
+    options.AddPolicy("AllowAll",
+        x => x
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials()
+        .SetIsOriginAllowed(_ => true));   // TEMPORARY FOR DEV
 });
 
 // ---------------------------
@@ -265,6 +279,7 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IAuditQueryService, AuditQueryService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 
 // Orchestrator visible to the app:
 builder.Services.AddScoped<IPlannerService, PlannerService>();
@@ -325,6 +340,47 @@ builder.Services.AddHttpClient();
 // ---------------------------
 var app = builder.Build();
 
+static async System.Threading.Tasks.Task SeedRolesAndAdminUserAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+
+    // ---- Ensure Roles Exist ----
+    var roles = new[] { "Admin", "User" };
+
+    foreach (var role in roles)
+    {
+        if (!await roleManager.RoleExistsAsync(role))
+        {
+            await roleManager.CreateAsync(new IdentityRole(role));
+        }
+    }
+
+    // ---- Create Default Admin ----
+    var adminEmail = "kgvishnupandit@gmail.com";
+    var adminUser = await userManager.FindByEmailAsync(adminEmail);
+
+    if (adminUser is null)
+    {
+        adminUser = new ApplicationUser
+        {
+            UserName = adminEmail,
+            Email = adminEmail,
+            FullName = "FlowOS Admin"
+        };
+
+        var result = await userManager.CreateAsync(adminUser, "Admin@123");
+
+        if (result.Succeeded)
+        {
+            await userManager.AddToRoleAsync(adminUser, "Admin");
+        }
+    }
+
+    return; // 👈 Fix CS0161
+}
+
 // Trust X-Forwarded-* (Azure/AppGW/NGINX)
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
@@ -350,6 +406,9 @@ app.MapControllers();
 
 // Simple health root
 app.MapGet("/", () => Results.Ok("✅ FlowOS API running"));
+
+// ⬇️ ADD THIS BEFORE app.Run()
+await SeedRolesAndAdminUserAsync(app);
 
 // ---------------------------
 // 10) Run

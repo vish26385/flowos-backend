@@ -23,7 +23,7 @@ namespace FlowOS.Api.Data
         public DbSet<ToneHistory> ToneHistories => Set<ToneHistory>();
 
         public DbSet<AiPlanAudit> AiPlanAudits { get; set; }
-
+        public DbSet<UserDeviceToken> UserDeviceTokens => Set<UserDeviceToken>();
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);

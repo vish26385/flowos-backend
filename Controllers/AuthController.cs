@@ -53,6 +53,12 @@ namespace FlowOS.Api.Controllers
             // ✅ Save user to the Identity store
             var result = await _userManager.CreateAsync(user, dto.Password);
 
+            if (result.Succeeded)
+            {
+                // Assign normal user role
+                await _userManager.AddToRoleAsync(user, "User");
+            }
+
             if (!result.Succeeded)
                 return BadRequest(result.Errors);
 

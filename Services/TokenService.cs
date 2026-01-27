@@ -1,5 +1,6 @@
 ﻿using FlowOS.Api.Data;
 using FlowOS.Api.Models;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
@@ -12,11 +13,13 @@ namespace FlowOS.Api.Services
 {
     public class TokenService
     {
-        private readonly IConfiguration _config;       
+        private readonly IConfiguration _config;
+        private readonly UserManager<ApplicationUser> _userManager;
 
-        public TokenService(IConfiguration config)
+        public TokenService(IConfiguration config, UserManager<ApplicationUser> userManager)
         {
             _config = config;
+            _userManager = userManager;
         }
 
         /// <summary>
@@ -29,13 +32,20 @@ namespace FlowOS.Api.Services
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-            var claims = new[]
+            var claims = new List<Claim>
             {
                 new Claim("id", user.Id),                                   // your custom claim
-                new Claim(ClaimTypes.Name, user.UserName ?? string.Empty),
-                new Claim(ClaimTypes.Email, user.Email ?? string.Empty),
+                new Claim("name", user.UserName ?? string.Empty),
+                new Claim("email", user.Email ?? string.Empty),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
+
+            // ADD ROLES INSIDE JWT
+            var roles = await _userManager.GetRolesAsync(user);
+
+            claims.AddRange(
+                roles.Select(r => new Claim("role", r))
+            );
 
             var token = new JwtSecurityToken(
                 issuer: jwtSection["Issuer"],
