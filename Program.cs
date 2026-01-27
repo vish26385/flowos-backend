@@ -340,6 +340,9 @@ builder.Services.AddHttpClient();
 // ---------------------------
 var app = builder.Build();
 
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+app.Urls.Add($"http://0.0.0.0:{port}");
+
 static async System.Threading.Tasks.Task SeedRolesAndAdminUserAsync(WebApplication app)
 {
     using var scope = app.Services.CreateScope();
