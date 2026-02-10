@@ -28,6 +28,10 @@ namespace FlowOS.Api.Data
         {
             base.OnModelCreating(modelBuilder);
 
+            modelBuilder.Entity<UserDeviceToken>()
+            .HasIndex(x => new { x.UserId, x.ExpoPushToken })
+            .IsUnique();
+
             // ---- Enum <-> string converters
             var toneConverter = new EnumToStringConverter<PlanTone>();
 
