@@ -146,45 +146,63 @@ builder.Services.AddScoped<OpenAIPlannerService>();
 // HttpClient for any REST the AI service might perform
 builder.Services.AddHttpClient<OpenAIPlannerService>();
 
-// ---------------------------
-// 7) Settings Binding
-// ---------------------------
+//// ---------------------------
+//// 7) Settings Binding
+//// ---------------------------
+//builder.Services.Configure<OpenAISettings>(builder.Configuration.GetSection("OpenAI"));
+//builder.Services.AddSingleton(sp =>
+//{
+//    var config = sp.GetRequiredService<IConfiguration>();
+//    var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY")
+//                 ?? config["OpenAI:ApiKey"];
+
+//    if (string.IsNullOrWhiteSpace(apiKey))
+//        throw new InvalidOperationException("Missing OpenAI API key.");
+
+//    return new OpenAIClient(apiKey);
+//});
+
+//var useOpenAI = builder.Configuration.GetValue<bool>("Planner:UseOpenAI");
+
+//// ---------------------------
+//// 8) OpenAI SDK Client (OC1)
+//// ---------------------------
+//// We register the official OpenAIClient as a singleton.
+//// It uses OpenAISettings.ApiKey (and optional Organization).
+//builder.Services.AddSingleton(sp =>
+//{
+//    var settings = sp.GetRequiredService<IOptions<OpenAISettings>>().Value;
+
+//    if (string.IsNullOrWhiteSpace(settings.ApiKey))
+//    {
+//        if (useOpenAI)
+//            throw new InvalidOperationException("❌ OpenAI:ApiKey is missing in configuration.");
+
+//        // If AI disabled, return a dummy client
+//        // (We avoid null so DI still works, but this client should not be used)
+//        return new OpenAIClient(new ApiKeyCredential("DUMMY_KEY"));
+//    }
+
+//    var opts = new OpenAIClientOptions();
+//    return new OpenAIClient(new ApiKeyCredential(settings.ApiKey!), opts);
+//});
+
 builder.Services.Configure<OpenAISettings>(builder.Configuration.GetSection("OpenAI"));
+
 builder.Services.AddSingleton(sp =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
-    var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY")
-                 ?? config["OpenAI:ApiKey"];
+
+    // Prefer environment variable in production (Render)
+    var apiKey =
+        Environment.GetEnvironmentVariable("OPENAI_API_KEY")
+        ?? config["OpenAI:ApiKey"];
 
     if (string.IsNullOrWhiteSpace(apiKey))
-        throw new InvalidOperationException("Missing OpenAI API key.");
-
-    return new OpenAIClient(apiKey);
-});
-
-var useOpenAI = builder.Configuration.GetValue<bool>("Planner:UseOpenAI");
-
-// ---------------------------
-// 8) OpenAI SDK Client (OC1)
-// ---------------------------
-// We register the official OpenAIClient as a singleton.
-// It uses OpenAISettings.ApiKey (and optional Organization).
-builder.Services.AddSingleton(sp =>
-{
-    var settings = sp.GetRequiredService<IOptions<OpenAISettings>>().Value;
-
-    if (string.IsNullOrWhiteSpace(settings.ApiKey))
-    {
-        if (useOpenAI)
-            throw new InvalidOperationException("❌ OpenAI:ApiKey is missing in configuration.");
-
-        // If AI disabled, return a dummy client
-        // (We avoid null so DI still works, but this client should not be used)
-        return new OpenAIClient(new ApiKeyCredential("DUMMY_KEY"));
-    }
+        throw new InvalidOperationException("Missing OpenAI API key. Set OPENAI_API_KEY env var or OpenAI:ApiKey config.");
 
     var opts = new OpenAIClientOptions();
-    return new OpenAIClient(new ApiKeyCredential(settings.ApiKey!), opts);
+    return new OpenAIClient(new ApiKeyCredential(apiKey), opts);
 });
 
 // You may also want IHttpClientFactory generally:
@@ -194,6 +212,11 @@ builder.Services.AddHttpClient();
 // 9) App Pipeline
 // ---------------------------
 var app = builder.Build();
+
+var envKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+app.Logger.LogInformation("OPENAI_API_KEY present: {Present}, length: {Len}",
+    !string.IsNullOrWhiteSpace(envKey),
+    string.IsNullOrWhiteSpace(envKey) ? 0 : envKey.Length);
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 app.Urls.Add($"http://0.0.0.0:{port}");
