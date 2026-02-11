@@ -19,13 +19,15 @@ namespace FlowOS.Api.Controllers
     public class AuthController : ControllerBase
     {
         private readonly UserManager<ApplicationUser> _userManager;
+        private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IConfiguration _config;
         private static readonly Dictionary<string, string> _refreshTokens = new(); // demo in-memory store
         private readonly TokenService _tokenService;
         private readonly FlowOSContext _context;
         private readonly IEmailService _emailService;
 
-        public AuthController(UserManager<ApplicationUser> userManager, 
+        public AuthController(UserManager<ApplicationUser> userManager,
+                              RoleManager<IdentityRole> roleManager,
                               IConfiguration config, 
                               TokenService tokenService, 
                               FlowOSContext context,
@@ -33,6 +35,7 @@ namespace FlowOS.Api.Controllers
                               )
         {
             _userManager = userManager;
+            _roleManager = roleManager;
             _config = config;
             _tokenService = tokenService;
             _context = context;
@@ -55,6 +58,11 @@ namespace FlowOS.Api.Controllers
 
             if (result.Succeeded)
             {
+                if (!await _roleManager.RoleExistsAsync("User"))
+                {
+                    await _roleManager.CreateAsync(new IdentityRole("User"));
+                }
+
                 // Assign normal user role
                 await _userManager.AddToRoleAsync(user, "User");
             }
