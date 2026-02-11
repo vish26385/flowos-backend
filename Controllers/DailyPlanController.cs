@@ -24,8 +24,11 @@ namespace FlowOS.Api.Controllers
             if (userId == null) return Unauthorized();
             if (!DateTime.TryParse(date, out var parsed)) return
             BadRequest("Invalid date");
-            var plan = await _context.DailyPlans.FirstOrDefaultAsync(d => d.UserId
-            == userId && d.Date.Date == parsed.Date);
+            //var plan = await _context.DailyPlans.FirstOrDefaultAsync(d => d.UserId
+            //== userId && d.Date.Date == parsed.Date);
+            var plan = await _context.DailyPlans
+                      .Include(p => p.Items)
+                      .FirstOrDefaultAsync(d => d.UserId == userId && d.Date.Date == parsed.Date);
             if (plan == null) return NotFound();
             return Ok(plan);
         }
