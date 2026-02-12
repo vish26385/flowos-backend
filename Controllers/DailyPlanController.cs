@@ -23,29 +23,38 @@ namespace FlowOS.Api.Controllers
         [HttpGet("{date}")]
         public async Task<IActionResult> GetPlan(string date)
         {
-            //var userId = User.FindFirst("id")?.Value;
-            var userId = User.FindFirstValue("id")
-                         ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
-                         ?? User.FindFirstValue("sub");
-            if (string.IsNullOrWhiteSpace(userId)) return Unauthorized();
-            if (!DateTime.TryParseExact(
-                date,
-                "yyyy-MM-dd",
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.None,
-                out var parsed))
-                return BadRequest("Invalid date. Use yyyy-MM-dd");
-            //if (!DateTime.TryParse(date, out var parsed)) 
-            //    return BadRequest("Invalid date");
-            //var plan = await _context.DailyPlans.FirstOrDefaultAsync(d => d.UserId
-            //== userId && d.Date.Date == parsed.Date);
-            var plan = await _context.DailyPlans
-                      .AsNoTracking()
-                      .Include(p => p.Items)
-                      .FirstOrDefaultAsync(d => d.UserId == userId && d.Date.Date == parsed.Date);
-            if (plan == null) return NotFound();
-            var dto = PlanMapper.ToPlanResponseDto(plan);
-            return Ok(dto);
+            try
+            {
+                //var userId = User.FindFirst("id")?.Value;
+                var userId = User.FindFirstValue("id")
+                             ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
+                             ?? User.FindFirstValue("sub");
+                if (string.IsNullOrWhiteSpace(userId)) return Unauthorized();
+                if (!DateTime.TryParseExact(
+                    date,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var parsed))
+                    return BadRequest("Invalid date. Use yyyy-MM-dd");
+                //if (!DateTime.TryParse(date, out var parsed)) 
+                //    return BadRequest("Invalid date");
+                //var plan = await _context.DailyPlans.FirstOrDefaultAsync(d => d.UserId
+                //== userId && d.Date.Date == parsed.Date);
+                var plan = await _context.DailyPlans
+                          .AsNoTracking()
+                          .Include(p => p.Items)
+                          .FirstOrDefaultAsync(d => d.UserId == userId && d.Date.Date == parsed.Date);
+                if (plan == null) return NotFound();
+                var dto = PlanMapper.ToPlanResponseDto(plan);
+                return Ok(dto);
+            }
+            catch (Exception ex)
+            {
+                // ✅ This will appear in Render logs
+                Console.WriteLine("❌ GetPlan crashed: " + ex);
+                return StatusCode(500, "GetPlan crashed: " + ex.Message);
+            }
         }
 
         [HttpPost("save")]
