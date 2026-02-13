@@ -2,6 +2,7 @@
 using FlowOS.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace FlowOS.Api.Services.Notifications
 {
@@ -9,9 +10,12 @@ namespace FlowOS.Api.Services.Notifications
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<NudgeWorker> _logger;
-        private readonly ExpoPushOptions _opt;
+        private readonly IOptions<ExpoPushOptions> _opt;
 
-        public NudgeWorker(IServiceScopeFactory scopeFactory, ILogger<NudgeWorker> logger, ExpoPushOptions opt)
+        public NudgeWorker(
+            IServiceScopeFactory scopeFactory,
+            ILogger<NudgeWorker> logger,
+            IOptions<ExpoPushOptions> opt)
         {
             _scopeFactory = scopeFactory;
             _logger = logger;
@@ -31,12 +35,24 @@ namespace FlowOS.Api.Services.Notifications
                 {
                     await RunOnce(stoppingToken);
                 }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    // graceful shutdown
+                    break;
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "❌ NudgeWorker loop error");
                 }
 
-                await timer.WaitForNextTickAsync(stoppingToken);
+                try
+                {
+                    await timer.WaitForNextTickAsync(stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
             }
         }
 
@@ -71,6 +87,10 @@ namespace FlowOS.Api.Services.Notifications
                 .Where(x => x.IsActive && userIds.Contains(x.UserId))
                 .ToListAsync(ct);
 
+            // Read options safely (default fallback)
+            var options = _opt.Value ?? new ExpoPushOptions();
+            var batchSize = Math.Max(1, options.BatchSize);
+
             foreach (var task in dueTasks)
             {
                 var userTokens = tokens
@@ -103,7 +123,6 @@ namespace FlowOS.Api.Services.Notifications
                 });
 
                 // Batch handling
-                var batchSize = Math.Max(1, _opt.BatchSize);
                 var batches = messages.Chunk(batchSize);
 
                 bool anyOk = false;
