@@ -152,6 +152,16 @@ builder.Services.AddScoped<OpenAIPlannerService>();
 // HttpClient for any REST the AI service might perform
 builder.Services.AddHttpClient<OpenAIPlannerService>();
 
+// ✅ Bind ExpoPush from appsettings.json using ONE options class (Configurations)
+builder.Services.Configure<FlowOS.Api.Configurations.ExpoPushOptions>(
+    builder.Configuration.GetSection("ExpoPush")
+);
+
+// ✅ Expo client + worker
+builder.Services.AddHttpClient<ExpoPushClient>();
+builder.Services.AddHostedService<NudgeWorker>();
+
+
 //// ---------------------------
 //// 7) Settings Binding
 //// ---------------------------

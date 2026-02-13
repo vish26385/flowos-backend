@@ -50,6 +50,13 @@ namespace FlowOS.Api.Data
                 b.Property(t => t.Notes).HasMaxLength(400);
             });
 
+            //modelBuilder.Entity<Task>()
+            //    .Property(t => t.DueDate)
+            //    .HasConversion(
+            //        v => DateTime.SpecifyKind(v, DateTimeKind.Utc),
+            //        v => DateTime.SpecifyKind(v, DateTimeKind.Utc)
+            //    );
+
             modelBuilder.Entity<Task>()
                 .Property(t => t.DueDate)
                 .HasConversion(
@@ -57,11 +64,19 @@ namespace FlowOS.Api.Data
                     v => DateTime.SpecifyKind(v, DateTimeKind.Utc)
                 );
 
-            //modelBuilder.Entity<DailyPlan>()            
-            //.HasMany(p => p.Items)
-            //.WithOne(i => i.Plan)
-            //.HasForeignKey(i => i.PlanId)
-            //.OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<Task>()
+                .Property(t => t.NudgeAtUtc)
+                .HasConversion(
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v,
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v
+                );
+
+            modelBuilder.Entity<Task>()
+                .Property(t => t.NudgeSentAtUtc)
+                .HasConversion(
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v,
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v
+                );
 
             modelBuilder.Entity<DailyPlan>(entity =>
             {
