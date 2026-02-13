@@ -161,7 +161,6 @@ builder.Services.Configure<FlowOS.Api.Configurations.ExpoPushOptions>(
 builder.Services.AddHttpClient<ExpoPushClient>();
 builder.Services.AddHostedService<NudgeWorker>();
 
-
 //// ---------------------------
 //// 7) Settings Binding
 //// ---------------------------
