@@ -2,6 +2,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 namespace FlowOS.Api.Services.Notifications
 {
@@ -10,10 +11,10 @@ namespace FlowOS.Api.Services.Notifications
         private readonly HttpClient _http;
         private readonly ExpoPushOptions _opt;
 
-        public ExpoPushClient(HttpClient http, ExpoPushOptions opt)
+        public ExpoPushClient(HttpClient http, IOptions<ExpoPushOptions> opt)
         {
             _http = http;
-            _opt = opt;
+            _opt = opt.Value ?? new ExpoPushOptions();
         }
 
         public async Task<(bool ok, string? error)> SendAsync(IEnumerable<ExpoPushMessage> messages, CancellationToken ct)

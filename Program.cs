@@ -153,7 +153,7 @@ builder.Services.AddScoped<OpenAIPlannerService>();
 builder.Services.AddHttpClient<OpenAIPlannerService>();
 
 // ✅ Bind ExpoPush from appsettings.json using ONE options class (Configurations)
-builder.Services.Configure<FlowOS.Api.Configurations.ExpoPushOptions>(
+builder.Services.Configure<ExpoPushOptions>(
     builder.Configuration.GetSection("ExpoPush")
 );
 
