@@ -35,6 +35,10 @@ namespace FlowOS.Api.Controllers
             // but we still force UTC Kind to avoid Npgsql issues
             var dueUtc = dto.DueDate.UtcDateTime;
 
+            // ✅ HARD GUARD: reject truly past tasks
+            if (dueUtc < DateTime.UtcNow.AddMinutes(-2))
+                return BadRequest(new { message = "Due time must be in the future." });
+
             var task = new Task
             {
                 Title = dto.Title,
@@ -289,15 +293,21 @@ namespace FlowOS.Api.Controllers
         {
             var nowUtc = DateTime.UtcNow;
 
-            // if due already passed, don't schedule a nudge
+            var grace = TimeSpan.FromMinutes(2);
+
             if (dueUtc <= nowUtc)
-                return null;
+            {
+                if (nowUtc - dueUtc <= grace)
+                    return nowUtc.AddSeconds(30);   // soft nudge
+
+                return null; // truly old
+            }
 
             var target = dueUtc.AddMinutes(-leadMinutes);
 
-            // if we are inside the lead window, schedule a short delay (avoid instant spam)
-            if (target <= nowUtc)
-                return nowUtc.AddSeconds(30);
+            var minAllowed = nowUtc.AddSeconds(30);
+            if (target <= minAllowed)
+                return minAllowed;
 
             return target;
         }

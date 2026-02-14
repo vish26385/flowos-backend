@@ -614,7 +614,20 @@ namespace FlowOS.Api.Services.Planner
                         {
                             var nowUtc = DateTime.UtcNow;
 
-                            // 1) Convert all AI times to UTC once
+                            // user working hours (UTC)
+                            var workStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
+                            var workEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
+
+                            // ✅ determine realistic first start time
+                            var earliest = EarliestStartUtc(
+                                nowUtc,
+                                workStart,
+                                workEnd,
+                                bufferMinutes: 5,
+                                roundToMinutes: 10
+                            );
+
+                            // 1) Normalize AI times to UTC once
                             var normalized = aiResult.Timeline
                                 .Select(i => new
                                 {
@@ -630,10 +643,11 @@ namespace FlowOS.Api.Services.Planner
                             // 2) Compute ONE global shift (preserve spacing)
                             var minStartUtc = normalized.Min(x => x.StartUtc);
 
-                            // If the plan starts in the past, move the entire plan so the first item starts "now"
-                            var shift = minStartUtc < nowUtc ? (nowUtc - minStartUtc) : TimeSpan.Zero;
+                            var shift = minStartUtc < earliest
+                                ? (earliest - minStartUtc)
+                                : TimeSpan.Zero;
 
-                            // 3) Create DB items with shifted times (no per-item clamping!)
+                            // 3) Create DB items with shifted times
                             var items = normalized
                                 .OrderBy(x => x.StartUtc)
                                 .Select(x =>
@@ -641,7 +655,7 @@ namespace FlowOS.Api.Services.Planner
                                     var start = x.StartUtc + shift;
                                     var end = x.EndUtc + shift;
 
-                                    // safety: if AI produced invalid duration, force 30 min block
+                                    // safety: invalid duration fallback
                                     if (end <= start)
                                         end = start.AddMinutes(30);
 
@@ -656,8 +670,10 @@ namespace FlowOS.Api.Services.Planner
 
                                         Confidence = Math.Clamp(x.Confidence, 1, 5),
 
-                                        // keep nudge aligned with the shifted schedule
-                                        NudgeAt = x.NudgeAtUtc.HasValue ? (x.NudgeAtUtc.Value + shift) : null
+                                        // keep nudge aligned with shifted timeline
+                                        NudgeAt = x.NudgeAtUtc.HasValue
+                                            ? x.NudgeAtUtc.Value + shift
+                                            : null
                                     };
                                 })
                                 .ToList();
@@ -794,6 +810,37 @@ namespace FlowOS.Api.Services.Planner
 
         private static DateTime EnsureUtc(DateTime dt)
             => dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt.ToUniversalTime(), DateTimeKind.Utc);
+
+        public static DateTime EarliestStartUtc(
+                      DateTime nowUtc,
+                      TimeSpan workStartUtcTime,
+                      TimeSpan workEndUtcTime,
+                      int bufferMinutes = 5,
+                      int roundToMinutes = 10)
+                          {
+                              if (nowUtc.Kind != DateTimeKind.Utc)
+                                  nowUtc = DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc);
+
+                              var t = nowUtc.AddMinutes(bufferMinutes);
+
+                              var remainder = t.Minute % roundToMinutes;
+                              if (remainder != 0)
+                                  t = t.AddMinutes(roundToMinutes - remainder);
+
+                              t = new DateTime(t.Year, t.Month, t.Day, t.Hour, t.Minute, 0, DateTimeKind.Utc);
+
+                              var dayStart = new DateTime(t.Year, t.Month, t.Day, 0, 0, 0, DateTimeKind.Utc);
+                              var workStart = dayStart.Add(workStartUtcTime);
+                              var workEnd = dayStart.Add(workEndUtcTime);
+
+                              if (t < workStart)
+                                  t = workStart;
+
+                              if (t >= workEnd)
+                                  t = dayStart.AddDays(1).Add(workStartUtcTime);
+
+                              return t;
+                          }
 
         private static PlanTone MapToneFromString(string? s)
         {
