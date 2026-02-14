@@ -7,5 +7,6 @@
         public DateTimeOffset DueDate { get; set; } // ✅ global-safe
         public int Priority { get; set; }
         public bool Completed { get; set; }
+        public int? EstimatedMinutes { get; set; }   //  ✅ add default to 30 if null
     }
 }

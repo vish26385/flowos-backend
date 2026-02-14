@@ -26,7 +26,7 @@ namespace FlowOS.Api.Controllers
             //var userId = User.FindFirst("id")?.Value; // from JWT (string)
 
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
-             ?? User.FindFirst("id")?.Value;
+                         ?? User.FindFirst("id")?.Value;
 
             if (string.IsNullOrEmpty(userId))
                 return Unauthorized();
@@ -44,6 +44,11 @@ namespace FlowOS.Api.Controllers
                 Priority = dto.Priority,
                 UserId = userId,
                 Completed = false,
+
+                // ✅ Default duration saved in DB
+                EstimatedMinutes = dto.EstimatedMinutes.HasValue && dto.EstimatedMinutes.Value > 0
+                ? dto.EstimatedMinutes.Value
+                : 30,
 
                 // ✅ STEP 11.2
                 NudgeAtUtc = CalcNudgeAtUtc(dueUtc),
@@ -178,10 +183,7 @@ namespace FlowOS.Api.Controllers
             var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
             if (task == null) return NotFound();
 
-            var oldDueUtc = task.DueDate;
-            var oldCompleted = task.Completed;
-
-            // ✅ Convert DTO -> UTC DateTime for timestamptz
+            var oldDue = task.DueDate;
             var newDueUtc = dto.DueDate.UtcDateTime;
 
             task.Title = dto.Title;
@@ -190,81 +192,114 @@ namespace FlowOS.Api.Controllers
             task.Priority = dto.Priority;
             task.Completed = dto.Completed;
 
-            var dueChanged = oldDueUtc != newDueUtc;
-            var reopened = oldCompleted == true && task.Completed == false;
+            task.EstimatedMinutes = dto.EstimatedMinutes.HasValue && dto.EstimatedMinutes.Value > 0
+                                    ? dto.EstimatedMinutes.Value
+                                    : (task.EstimatedMinutes ?? 30);
 
-            var nowUtc = DateTime.UtcNow;
+            var dueChanged = oldDue != newDueUtc;
 
-            // ✅ If completed => stop nudges completely
+            if (dueChanged)
+            {
+                task.NudgeAtUtc = CalcNudgeAtUtc(newDueUtc);
+                task.NudgeSentAtUtc = null;
+                task.LastNudgeError = null;
+            }
+
             if (task.Completed)
             {
-                task.NudgeAtUtc = null;         // ✅ stop future nudges
+                // stop future nudges
+                task.NudgeAtUtc = null;
+                task.NudgeSentAtUtc = DateTime.UtcNow;
                 task.LastNudgeError = null;
-                // keep NudgeSentAtUtc as-is (don’t fake "sent now")
             }
             else
             {
-                // ✅ If due changed OR task reopened => reschedule and allow send again
-                if (dueChanged || reopened)
-                {
-                    var nudgeAt = CalcNudgeAtUtc(newDueUtc);
-
-                    // Optional safety: avoid "past" nudges causing instant spam
-                    if (nudgeAt < nowUtc) nudgeAt = nowUtc;
-
-                    task.NudgeAtUtc = nudgeAt;
-                    task.NudgeSentAtUtc = null;   // ✅ allow sending again
-                    task.LastNudgeError = null;
-                }
-                else
-                {
-                    // If unchanged and no nudge set yet, set it once
-                    if (task.NudgeAtUtc == null)
-                    {
-                        var nudgeAt = CalcNudgeAtUtc(task.DueDate);
-                        if (nudgeAt < nowUtc) nudgeAt = nowUtc;
-                        task.NudgeAtUtc = nudgeAt;
-                    }
-                    // don't touch NudgeSentAtUtc here
-                }
+                // ensure nudge exists
+                task.NudgeAtUtc ??= CalcNudgeAtUtc(task.DueDate);
             }
 
             await _context.SaveChangesAsync();
             return Ok(task);
         }
 
+        //// DELETE: api/tasks/{id}
+        //[HttpDelete("{id}")]
+        //public async Task<IActionResult> DeleteTask(int id)
+        //{
+        //    var userId = User.FindFirst("id")?.Value; // from JWT (string)
+
+        //    if (userId == null)
+        //        return Unauthorized();
+
+        //    var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+
+        //    if (task == null) return NotFound();
+
+        //    _context.Tasks.Remove(task);
+        //    await _context.SaveChangesAsync();
+
+        //    return NoContent();
+        //}
+
         // DELETE: api/tasks/{id}
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteTask(int id)
         {
-            var userId = User.FindFirst("id")?.Value; // from JWT (string)
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                         ?? User.FindFirst("id")?.Value;
 
-            if (userId == null)
+            if (string.IsNullOrEmpty(userId))
                 return Unauthorized();
 
-            var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+            // Load the task first (we need its due date day)
+            var task = await _context.Tasks
+                .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
 
-            if (task == null) return NotFound();
+            if (task == null)
+                return NotFound();
 
+            // ✅ Task due date is stored as UTC in your DB (timestamptz)
+            // We will delete the plan for the SAME UTC day as the task due date.
+            var dayUtc = DateTime.SpecifyKind(task.DueDate.Date, DateTimeKind.Utc);
+
+            await using var tx = await _context.Database.BeginTransactionAsync();
+
+            // 1) Delete the task
             _context.Tasks.Remove(task);
             await _context.SaveChangesAsync();
+
+            // 2) Delete the plan for that day (if exists)
+            // Because DailyPlan -> DailyPlanItems is Cascade delete, items will delete automatically.
+            var plan = await _context.DailyPlans
+                .Include(p => p.Items)
+                .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == dayUtc);
+
+            if (plan != null)
+            {
+                _context.DailyPlans.Remove(plan);
+                await _context.SaveChangesAsync();
+            }
+
+            await tx.CommitAsync();
 
             return NoContent();
         }
 
-        private const int DefaultNudgeMinutesBefore = 10;
-
-        private static DateTime CalcNudgeAtUtc(DateTime dueUtc)
+        private static DateTime? CalcNudgeAtUtc(DateTime dueUtc, int leadMinutes = 10)
         {
-            var nudge = dueUtc.AddMinutes(-DefaultNudgeMinutesBefore);
-
             var nowUtc = DateTime.UtcNow;
 
-            // If calculated nudge time is already in past → send ASAP
-            if (nudge < nowUtc)
-                return nowUtc;
+            // if due already passed, don't schedule a nudge
+            if (dueUtc <= nowUtc)
+                return null;
 
-            return nudge;
+            var target = dueUtc.AddMinutes(-leadMinutes);
+
+            // if we are inside the lead window, schedule a short delay (avoid instant spam)
+            if (target <= nowUtc)
+                return nowUtc.AddSeconds(30);
+
+            return target;
         }
     }
 }

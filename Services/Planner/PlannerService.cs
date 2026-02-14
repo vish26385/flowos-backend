@@ -402,7 +402,7 @@ namespace FlowOS.Api.Services.Planner
                         Description = t.Description,
                         Priority = t.Priority,
                         DueDate = t.DueDate,               // already UTC if your DB is timestamptz
-                        EstimatedMinutes = t.EstimatedMinutes,
+                        EstimatedMinutes = t.EstimatedMinutes ?? 30,
                         EnergyLevel = t.EnergyLevel
                     }).ToList();
 
@@ -589,22 +589,77 @@ namespace FlowOS.Api.Services.Planner
 
                         await _context.SaveChangesAsync();
 
+                        //if (aiResult.Timeline.Any())
+                        //{
+                        //    var items = aiResult.Timeline
+                        //        .OrderBy(i => i.Start)
+                        //        .Select(i => new DailyPlanItem
+                        //        {
+                        //            PlanId = plan.Id,
+                        //            TaskId = i.TaskId,
+                        //            Label = i.Label,
+
+                        //            // ✅ Ensure these are UTC before writing to timestamptz
+                        //            Start = EnsureUtc(i.Start),
+                        //            End = EnsureUtc(i.End),
+                        //            Confidence = Math.Clamp(i.Confidence, 1, 5),
+                        //            NudgeAt = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : null
+                        //        });
+
+                        //    await _context.DailyPlanItems.AddRangeAsync(items);
+                        //    await _context.SaveChangesAsync();
+                        //}
+
                         if (aiResult.Timeline.Any())
                         {
+                            var nowUtc = DateTime.UtcNow;
+
                             var items = aiResult.Timeline
                                 .OrderBy(i => i.Start)
-                                .Select(i => new DailyPlanItem
+                                .Select(i =>
                                 {
-                                    PlanId = plan.Id,
-                                    TaskId = i.TaskId,
-                                    Label = i.Label,
+                                    var startUtc = EnsureUtc(i.Start);
+                                    var endUtc = EnsureUtc(i.End);
 
-                                    // ✅ Ensure these are UTC before writing to timestamptz
-                                    Start = EnsureUtc(i.Start),
-                                    End = EnsureUtc(i.End),
-                                    Confidence = Math.Clamp(i.Confidence, 1, 5),
-                                    NudgeAt = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : null
-                                });
+                                    DateTime finalStart;
+                                    DateTime finalEnd;
+
+                                    if (endUtc <= nowUtc)
+                                    {
+                                        // move whole block to start now
+                                        var duration = endUtc - startUtc;
+
+                                        finalStart = nowUtc;
+                                        finalEnd = nowUtc.Add(duration <= TimeSpan.Zero
+                                            ? TimeSpan.FromMinutes(30)
+                                            : duration);
+                                    }
+                                    else if (startUtc < nowUtc)
+                                    {
+                                        // trim start to now
+                                        finalStart = nowUtc;
+                                        finalEnd = endUtc;
+                                    }
+                                    else
+                                    {
+                                        finalStart = startUtc;
+                                        finalEnd = endUtc;
+                                    }
+
+                                    return new DailyPlanItem
+                                    {
+                                        PlanId = plan.Id,
+                                        TaskId = i.TaskId,
+                                        Label = i.Label,
+
+                                        Start = finalStart,
+                                        End = finalEnd,
+
+                                        Confidence = Math.Clamp(i.Confidence, 1, 5),
+                                        NudgeAt = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : null
+                                    };
+                                })
+                                .ToList();
 
                             await _context.DailyPlanItems.AddRangeAsync(items);
                             await _context.SaveChangesAsync();

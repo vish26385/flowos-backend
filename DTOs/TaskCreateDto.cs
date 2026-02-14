@@ -6,5 +6,6 @@
         public string Description { get; set; } = "";
         public DateTimeOffset DueDate { get; set; } // ✅ global-safe
         public int Priority { get; set; }
+        public int? EstimatedMinutes { get; set; }   //  ✅ add default to 30 if null
     }
 }
