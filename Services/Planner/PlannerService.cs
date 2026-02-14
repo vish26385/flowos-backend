@@ -614,49 +614,50 @@ namespace FlowOS.Api.Services.Planner
                         {
                             var nowUtc = DateTime.UtcNow;
 
-                            var items = aiResult.Timeline
-                                .OrderBy(i => i.Start)
-                                .Select(i =>
+                            // 1) Convert all AI times to UTC once
+                            var normalized = aiResult.Timeline
+                                .Select(i => new
                                 {
-                                    var startUtc = EnsureUtc(i.Start);
-                                    var endUtc = EnsureUtc(i.End);
+                                    i.TaskId,
+                                    i.Label,
+                                    StartUtc = EnsureUtc(i.Start),
+                                    EndUtc = EnsureUtc(i.End),
+                                    i.Confidence,
+                                    NudgeAtUtc = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : (DateTime?)null
+                                })
+                                .ToList();
 
-                                    DateTime finalStart;
-                                    DateTime finalEnd;
+                            // 2) Compute ONE global shift (preserve spacing)
+                            var minStartUtc = normalized.Min(x => x.StartUtc);
 
-                                    if (endUtc <= nowUtc)
-                                    {
-                                        // move whole block to start now
-                                        var duration = endUtc - startUtc;
+                            // If the plan starts in the past, move the entire plan so the first item starts "now"
+                            var shift = minStartUtc < nowUtc ? (nowUtc - minStartUtc) : TimeSpan.Zero;
 
-                                        finalStart = nowUtc;
-                                        finalEnd = nowUtc.Add(duration <= TimeSpan.Zero
-                                            ? TimeSpan.FromMinutes(30)
-                                            : duration);
-                                    }
-                                    else if (startUtc < nowUtc)
-                                    {
-                                        // trim start to now
-                                        finalStart = nowUtc;
-                                        finalEnd = endUtc;
-                                    }
-                                    else
-                                    {
-                                        finalStart = startUtc;
-                                        finalEnd = endUtc;
-                                    }
+                            // 3) Create DB items with shifted times (no per-item clamping!)
+                            var items = normalized
+                                .OrderBy(x => x.StartUtc)
+                                .Select(x =>
+                                {
+                                    var start = x.StartUtc + shift;
+                                    var end = x.EndUtc + shift;
+
+                                    // safety: if AI produced invalid duration, force 30 min block
+                                    if (end <= start)
+                                        end = start.AddMinutes(30);
 
                                     return new DailyPlanItem
                                     {
                                         PlanId = plan.Id,
-                                        TaskId = i.TaskId,
-                                        Label = i.Label,
+                                        TaskId = x.TaskId,
+                                        Label = x.Label,
 
-                                        Start = finalStart,
-                                        End = finalEnd,
+                                        Start = start,
+                                        End = end,
 
-                                        Confidence = Math.Clamp(i.Confidence, 1, 5),
-                                        NudgeAt = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : null
+                                        Confidence = Math.Clamp(x.Confidence, 1, 5),
+
+                                        // keep nudge aligned with the shifted schedule
+                                        NudgeAt = x.NudgeAtUtc.HasValue ? (x.NudgeAtUtc.Value + shift) : null
                                     };
                                 })
                                 .ToList();
