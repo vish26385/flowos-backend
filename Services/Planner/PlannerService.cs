@@ -340,14 +340,21 @@ namespace FlowOS.Api.Services.Planner
         //    return MapToDto(savedPlan);
         //}
 
+        //public async Task<PlanResponseDto> GeneratePlanAsync(
+        //    string userId,
+        //    DateTime date,
+        //    string? toneOverride = null,
+        //    bool forceRegenerate = false)
         public async Task<PlanResponseDto> GeneratePlanAsync(
-            string userId,
-            DateTime date,
-            string? toneOverride = null,
-            bool forceRegenerate = false)
-                {
-                    // ✅ ALWAYS normalize incoming date to UTC day start (no Local DateTime ever)
-                    var startUtc = DateTimeUtc.UtcDayStart(date);
+                                            string userId,
+                                            DateTime date,
+                                            string? toneOverride = null,
+                                            bool forceRegenerate = false,
+                                            DateTime? planStartUtc = null // ✅ add this
+                                        )
+        {
+            // ✅ ALWAYS normalize incoming date to UTC day start (no Local DateTime ever)
+            var startUtc = DateTimeUtc.UtcDayStart(date);
                     var endUtc = startUtc.AddDays(1);
 
                     // If your DailyPlans.Date is a "date-only" semantic stored as DateTime,
@@ -618,13 +625,23 @@ namespace FlowOS.Api.Services.Planner
                             var workStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
                             var workEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
 
-                            // ✅ determine realistic first start time
-                            var earliest = EarliestStartUtc(
+                            //// ✅ determine realistic first start time
+                            //var earliest = EarliestStartUtc(
+                            //    nowUtc,
+                            //    workStart,
+                            //    workEnd,
+                            //    bufferMinutes: 5,
+                            //    roundToMinutes: 10
+                            //);
+
+                            // if caller passed planStartUtc, use it.
+                            // else fallback to your EarliestStartUtc(...) rule
+                            var earliest = planStartUtc ?? EarliestStartUtc(
                                 nowUtc,
                                 workStart,
                                 workEnd,
-                                bufferMinutes: 5,
-                                roundToMinutes: 10
+                                bufferMinutes: 10,
+                                roundToMinutes: 5
                             );
 
                             // 1) Normalize AI times to UTC once

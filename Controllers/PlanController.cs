@@ -18,25 +18,62 @@ namespace FlowOS.Api.Controllers
             _plannerService = plannerService;
         }
 
-        // POST: api/plan/generate
+        //// POST: api/plan/generate
+        //[HttpPost("generate")]
+        //public async Task<IActionResult> GeneratePlan([FromBody] GeneratePlanDto dto)
+        //{
+        //    //var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        //    //if (string.IsNullOrEmpty(userId))
+        //    //    return Unauthorized("User not found in token");
+
+        //    var userId = User.FindFirst("id")?.Value; // from JWT (string)
+
+        //    if (userId == null)
+        //        return Unauthorized("User not found in token");
+
+        //    if (dto.Date == default)
+        //        dto.Date = DateTime.Today;
+
+        //    var result = await _plannerService.GeneratePlanAsync(userId, dto.Date, dto.Tone);
+
+        //    return Ok(result);
+        //}
+
+        // POST /api/dailyplan/generate?date=2026-02-15&planStartLocal=2026-02-15T23:30:00
         [HttpPost("generate")]
-        public async Task<IActionResult> GeneratePlan([FromBody] GeneratePlanDto dto)
+        public async Task<IActionResult> Generate([FromQuery] string date, [FromQuery] DateTime? planStartLocal = null)
         {
-            //var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            //if (string.IsNullOrEmpty(userId))
-            //    return Unauthorized("User not found in token");
+            var userId =
+                User.FindFirstValue(ClaimTypes.NameIdentifier) ??
+                User.FindFirst("id")?.Value;
 
-            var userId = User.FindFirst("id")?.Value; // from JWT (string)
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized();
 
-            if (userId == null)
-                return Unauthorized("User not found in token");
+            if (!DateTime.TryParse(date, out var day))
+                return BadRequest("Invalid date");
 
-            if (dto.Date == default)
-                dto.Date = DateTime.Today;
+            // IST offset for now (later: per-user timezone)
+            var userOffset = TimeSpan.FromMinutes(330);
 
-            var result = await _plannerService.GeneratePlanAsync(userId, dto.Date, dto.Tone);
+            DateTime? planStartUtc = null;
 
-            return Ok(result);
+            if (planStartLocal.HasValue)
+            {
+                // Treat input as user-local (IST) even if Kind is Unspecified
+                var localUnspec = DateTime.SpecifyKind(planStartLocal.Value, DateTimeKind.Unspecified);
+                planStartUtc = new DateTimeOffset(localUnspec, userOffset).UtcDateTime;
+            }
+
+            var dto = await _plannerService.GeneratePlanAsync(
+                userId,
+                day,
+                toneOverride: null,
+                forceRegenerate: true,
+                planStartUtc: planStartUtc // ✅ new parameter
+            );
+
+            return Ok(dto);
         }
     }
 }

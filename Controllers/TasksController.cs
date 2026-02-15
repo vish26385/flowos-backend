@@ -49,10 +49,10 @@ namespace FlowOS.Api.Controllers
                 UserId = userId,
                 Completed = false,
 
-                // ✅ Default duration saved in DB
-                EstimatedMinutes = dto.EstimatedMinutes.HasValue && dto.EstimatedMinutes.Value > 0
-                ? dto.EstimatedMinutes.Value
-                : 30,
+                //// ✅ Default duration saved in DB
+                //EstimatedMinutes = dto.EstimatedMinutes.HasValue && dto.EstimatedMinutes.Value > 0
+                //? dto.EstimatedMinutes.Value
+                //: 30,
 
                 // ✅ STEP 11.2
                 NudgeAtUtc = CalcNudgeAtUtc(dueUtc),
@@ -196,9 +196,9 @@ namespace FlowOS.Api.Controllers
             task.Priority = dto.Priority;
             task.Completed = dto.Completed;
 
-            task.EstimatedMinutes = dto.EstimatedMinutes.HasValue && dto.EstimatedMinutes.Value > 0
-                                    ? dto.EstimatedMinutes.Value
-                                    : (task.EstimatedMinutes ?? 30);
+            //task.EstimatedMinutes = dto.EstimatedMinutes.HasValue && dto.EstimatedMinutes.Value > 0
+            //                        ? dto.EstimatedMinutes.Value
+            //                        : (task.EstimatedMinutes ?? 30);
 
             var dueChanged = oldDue != newDueUtc;
 
