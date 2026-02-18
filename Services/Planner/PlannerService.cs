@@ -436,12 +436,29 @@ namespace FlowOS.Api.Services.Planner
             DateTime? planStartUtc = null
         )
         {
-            // ✅ ALWAYS normalize incoming date to UTC day start (no Local DateTime ever)
-            var startUtc = DateTimeUtc.UtcDayStart(date);
-            var endUtc = startUtc.AddDays(1);
+            //// ✅ ALWAYS normalize incoming date to UTC day start (no Local DateTime ever)
+            //var startUtc = DateTimeUtc.UtcDayStart(date);
+            //var endUtc = startUtc.AddDays(1);
 
-            // If your DailyPlans.Date is a "date-only" semantic stored as DateTime,
-            // keep it as a UTC midnight DateTime.
+            //// If your DailyPlans.Date is a "date-only" semantic stored as DateTime,
+            //// keep it as a UTC midnight DateTime.
+            //var day = startUtc;
+
+            // ✅ Treat incoming `date` as an IST calendar date (date-only)
+            // Convert IST midnight window -> UTC window
+            var userOffset = TimeSpan.FromMinutes(330); // IST = +05:30
+
+            var istDate = date.Date; // date-only
+
+            var istStartLocal = DateTime.SpecifyKind(istDate, DateTimeKind.Unspecified);
+            var istEndLocal = DateTime.SpecifyKind(istDate.AddDays(1), DateTimeKind.Unspecified);
+
+            // UTC window that corresponds to IST day
+            var startUtc = new DateTimeOffset(istStartLocal, userOffset).UtcDateTime;
+            var endUtc = new DateTimeOffset(istEndLocal, userOffset).UtcDateTime;
+
+            // ✅ Use this as the "plan date key" in DB (consistent key)
+            // Store plan.Date as startUtc (UTC instant representing IST midnight)
             var day = startUtc;
 
             // --- Step 0: Load user + (optionally) reuse existing plan ---
@@ -473,6 +490,8 @@ namespace FlowOS.Api.Services.Planner
             var toneForThisPlanStr = (toneOverride ?? ToneToAiString(toneForThisPlanEnum))
                 .Trim()
                 .ToLowerInvariant();
+
+            _logger.LogInformation("PLAN WINDOW UTC: {Start} -> {End}", startUtc, endUtc);
 
             // ✅ Pull candidate tasks for this UTC day window (pending only)
             var dbTasks = await _context.Tasks

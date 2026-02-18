@@ -31,6 +31,9 @@ namespace FlowOS.Api.Controllers
             if (string.IsNullOrEmpty(userId))
                 return Unauthorized();
 
+            if (!HasOffsetInJson(dto.DueDate))
+                return BadRequest(new { message = "DueDate must include timezone offset (Z or +05:30)." });
+
             // IMPORTANT: dto.DueDate should already come in as UTC from mobile
             // but we still force UTC Kind to avoid Npgsql issues
             var dueUtc = dto.DueDate.UtcDateTime;
@@ -214,6 +217,9 @@ namespace FlowOS.Api.Controllers
             if (string.IsNullOrEmpty(userId))
                 return Unauthorized();
 
+            if (!HasOffsetInJson(dto.DueDate))
+                return BadRequest(new { message = "DueDate must include timezone offset (Z or +05:30)." });
+
             var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
             if (task == null) return NotFound();
 
@@ -340,6 +346,15 @@ namespace FlowOS.Api.Controllers
                 return minAllowed;
 
             return target;
+        }
+
+        private static bool HasOffsetInJson(DateTimeOffset dtoDueDate)
+        {
+            // DateTimeOffset always has an Offset, but if client sent "no offset",
+            // model binding may assume server local offset, which we don’t want.
+            // So we guard using a stricter approach: require client to send UTC (Offset=0)
+            // OR IST offset (+05:30). Otherwise reject.
+            return dtoDueDate.Offset == TimeSpan.Zero || dtoDueDate.Offset == TimeSpan.FromMinutes(330);
         }
     }
 }
