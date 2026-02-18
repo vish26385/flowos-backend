@@ -39,9 +39,11 @@ namespace FlowOS.Api.Controllers
         //    return Ok(result);
         //}
 
-        // POST /api/dailyplan/generate?date=2026-02-15&planStartLocal=2026-02-15T23:30:00
+        //// POST /api/plan/generate?date=2026-02-15&planStartLocal=2026-02-15T23:30:00
         //[HttpPost("generate")]
-        //public async Task<IActionResult> Generate([FromQuery] string date, [FromQuery] DateTime? planStartLocal = null)
+        //public async Task<IActionResult> Generate(
+        //    [FromQuery] string? date = null,
+        //    [FromQuery] DateTime? planStartLocal = null)
         //{
         //    var userId =
         //        User.FindFirstValue(ClaimTypes.NameIdentifier) ??
@@ -50,11 +52,21 @@ namespace FlowOS.Api.Controllers
         //    if (string.IsNullOrEmpty(userId))
         //        return Unauthorized();
 
-        //    if (!DateTime.TryParse(date, out var day))
-        //        return BadRequest("Invalid date");
-
         //    // IST offset for now (later: per-user timezone)
         //    var userOffset = TimeSpan.FromMinutes(330);
+
+        //    // ✅ If date not provided, default to TODAY in IST
+        //    if (string.IsNullOrWhiteSpace(date))
+        //    {
+        //        var istNow = DateTimeOffset.UtcNow.ToOffset(userOffset);
+        //        date = istNow.ToString("yyyy-MM-dd");
+        //    }
+
+        //    if (!DateTime.TryParse(date, out var day))
+        //        return BadRequest(new { message = "Invalid date. Use yyyy-MM-dd." });
+
+        //    // ✅ day should be treated as a DATE (ignore time)
+        //    day = day.Date;
 
         //    DateTime? planStartUtc = null;
 
@@ -62,6 +74,8 @@ namespace FlowOS.Api.Controllers
         //    {
         //        // Treat input as user-local (IST) even if Kind is Unspecified
         //        var localUnspec = DateTime.SpecifyKind(planStartLocal.Value, DateTimeKind.Unspecified);
+
+        //        // ✅ Convert IST local -> UTC
         //        planStartUtc = new DateTimeOffset(localUnspec, userOffset).UtcDateTime;
         //    }
 
@@ -70,17 +84,17 @@ namespace FlowOS.Api.Controllers
         //        day,
         //        toneOverride: null,
         //        forceRegenerate: true,
-        //        planStartUtc: planStartUtc // ✅ new parameter
+        //        planStartUtc: planStartUtc
         //    );
 
         //    return Ok(dto);
         //}
 
-        // POST /api/plan/generate?date=2026-02-15&planStartLocal=2026-02-15T23:30:00
+        // POST /api/plan/generate?date=2026-02-15&planStartLocal=2026-02-15T23:30:00+05:30
         [HttpPost("generate")]
         public async Task<IActionResult> Generate(
             [FromQuery] string? date = null,
-            [FromQuery] DateTime? planStartLocal = null)
+            [FromQuery] DateTimeOffset? planStartLocal = null)
         {
             var userId =
                 User.FindFirstValue(ClaimTypes.NameIdentifier) ??
@@ -102,21 +116,23 @@ namespace FlowOS.Api.Controllers
             if (!DateTime.TryParse(date, out var day))
                 return BadRequest(new { message = "Invalid date. Use yyyy-MM-dd." });
 
-            // ✅ day should be treated as a DATE (ignore time)
             day = day.Date;
 
             DateTime? planStartUtc = null;
 
             if (planStartLocal.HasValue)
             {
-                // Treat input as user-local (IST) even if Kind is Unspecified
-                var localUnspec = DateTime.SpecifyKind(planStartLocal.Value, DateTimeKind.Unspecified);
+                // If client sends no offset (rare), treat it as IST
+                var dto = planStartLocal.Value;
+                if (dto.Offset == TimeSpan.Zero && dto.DateTime.Kind == DateTimeKind.Unspecified)
+                {
+                    dto = new DateTimeOffset(dto.DateTime, userOffset);
+                }
 
-                // ✅ Convert IST local -> UTC
-                planStartUtc = new DateTimeOffset(localUnspec, userOffset).UtcDateTime;
+                planStartUtc = dto.UtcDateTime;
             }
 
-            var dto = await _plannerService.GeneratePlanAsync(
+            var dtoResult = await _plannerService.GeneratePlanAsync(
                 userId,
                 day,
                 toneOverride: null,
@@ -124,7 +140,7 @@ namespace FlowOS.Api.Controllers
                 planStartUtc: planStartUtc
             );
 
-            return Ok(dto);
+            return Ok(dtoResult);
         }
     }
 }

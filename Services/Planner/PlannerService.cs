@@ -45,176 +45,180 @@ namespace FlowOS.Api.Services.Planner
         }
 
         //public async Task<PlanResponseDto> GeneratePlanAsync(
-        //    string userId,
-        //    DateTime date,
-        //    string? toneOverride = null,
-        //    bool forceRegenerate = false)
+        //                                    string userId,
+        //                                    DateTime date,
+        //                                    string? toneOverride = null,
+        //                                    bool forceRegenerate = false,
+        //                                    DateTime? planStartUtc = null // ✅ add this
+        //                                )
         //{
-        //    var day = date.Date;
+        //    // ✅ ALWAYS normalize incoming date to UTC day start (no Local DateTime ever)
+        //    var startUtc = DateTimeUtc.UtcDayStart(date);
+        //            var endUtc = startUtc.AddDays(1);
 
-        //    // --- Step 0: Load user + (optionally) reuse existing plan ---
-        //    var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
-        //    if (user == null) throw new Exception("User not found");
+        //            // If your DailyPlans.Date is a "date-only" semantic stored as DateTime,
+        //            // keep it as a UTC midnight DateTime.
+        //            var day = startUtc;
 
-        //    var existing = await _context.DailyPlans
-        //        .AsNoTracking()
-        //        .Include(p => p.Items)
-        //        .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == day);
+        //            // --- Step 0: Load user + (optionally) reuse existing plan ---
+        //            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        //            if (user == null) throw new Exception("User not found");
 
-        //    if (existing != null && !forceRegenerate)
-        //    {
-        //        _logger.LogInformation(
-        //            "AI_PLAN_REUSE: User={UserId} Date={Date} Items={Items} Focus='{Focus}'",
-        //            userId, day.ToString("yyyy-MM-dd"), existing.Items.Count, existing.Focus ?? "");
-        //        return MapToDto(existing);
-        //    }
+        //            var existing = await _context.DailyPlans
+        //                .AsNoTracking()
+        //                .Include(p => p.Items)
+        //                .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == day);
 
-        //    // --- Step 1: Build AiPlanRequest (TAP2 + TL-C) ---
-        //    var workStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
-        //    var workEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
-
-        //    var firstName = (user.FullName ?? "")
-        //        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-        //        .FirstOrDefault() ?? "Friend";
-
-        //    // Tone hint for AI (string), respecting TAP2 and toneOverride
-        //    // Order of precedence: override -> PreferredTone -> CurrentTone -> Balanced
-        //    var toneForThisPlanEnum = user.PreferredTone ?? user.CurrentTone; // Preferred wins; else current
-        //    var toneForThisPlanStr = (toneOverride ?? ToneToAiString(toneForThisPlanEnum)).Trim().ToLowerInvariant();
-
-        //    var localDay = DateTime.SpecifyKind(day.Date, DateTimeKind.Local);
-        //    var startUtc = localDay.ToUniversalTime();
-        //    var endUtc = startUtc.AddDays(1);
-
-        //    // Pull candidate tasks for this day (pending only)
-        //    var dbTasks = await _context.Tasks
-        //        .Where(t => t.UserId == userId 
-        //           && !t.Completed
-        //           && t.DueDate >= startUtc
-        //           && t.DueDate < endUtc
-        //           )
-        //        .OrderByDescending(t => t.Priority)
-        //        .ToListAsync();
-
-        //    var taskCtx = dbTasks.Select(t => new TaskAiContext
-        //    {
-        //        Id = t.Id,
-        //        Title = t.Title,
-        //        Description = t.Description,
-        //        Priority = t.Priority,
-        //        DueDate = t.DueDate,
-        //        EstimatedMinutes = t.EstimatedMinutes,
-        //        EnergyLevel = t.EnergyLevel
-        //    }).ToList();
-
-        //    var aiRequest = new AiPlanRequest
-        //    {
-        //        UserId = userId,
-        //        User = new UserAiContext
-        //        {
-        //            Id = userId,
-        //            FirstName = firstName,
-        //            FullName = user.FullName,
-        //            WorkStart = workStart,
-        //            WorkEnd = workEnd,
-        //            // AI context still expects string; pass PreferredTone if exists, else null (TAP2)
-        //            PreferredTone = user.PreferredTone?.ToString() // remains optional string in AI context
-        //        },
-        //        Tasks = taskCtx,
-        //        Date = day,
-        //        Tone = toneForThisPlanStr,   // TL-C: final hint to AI; AI may adjust slightly via prompt rules
-        //        ForceRegenerate = forceRegenerate
-        //    };
-
-        //    // --- Step 2: Call AI engine (OpenAIPlannerService handles retries/fallbacks) ---
-        //    var swAi = Stopwatch.StartNew();
-        //    DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
-
-        //    var metrics = AiPlanQualityAnalyzer.Analyze(aiResult, aiRequest.Tasks.Count);
-
-        //    bool shouldRegenerate =
-        //        metrics.AvgConfidence < MinConfidenceThreshold ||
-        //        metrics.CoveragePercent < MinCoverageThreshold ||
-        //        metrics.AlignedTasksPercent < MinAlignedThreshold;
-
-        //    if (shouldRegenerate)
-        //    {
-        //        _logger.LogWarning(
-        //            "⚠️ AI plan quality below threshold | Confidence={0} | Coverage={1}% | Aligned={2}% — retrying once.",
-        //            metrics.AvgConfidence, metrics.CoveragePercent, metrics.AlignedTasksPercent
-        //        );
-
-        //        try
-        //        {
-        //            // Force regenerate with upgraded model or stricter rules
-        //            var retryRequest = aiRequest with { ForceRegenerate = true };
-        //            var retryResult = await _aiPlanner.GenerateAiPlanAsync(retryRequest);
-        //            var retryMetrics = AiPlanQualityAnalyzer.Analyze(retryResult, aiRequest.Tasks.Count);
-
-        //            if (retryMetrics.AvgConfidence >= MinConfidenceThreshold &&
-        //                retryMetrics.CoveragePercent >= MinCoverageThreshold)
+        //            if (existing != null && !forceRegenerate)
         //            {
-        //                _logger.LogInformation("✅ Regeneration successful: plan quality improved to acceptable levels.");
-        //                aiResult = retryResult;
+        //                _logger.LogInformation(
+        //                    "AI_PLAN_REUSE: User={UserId} Date={Date} Items={Items} Focus='{Focus}'",
+        //                    userId, day.ToString("yyyy-MM-dd"), existing.Items.Count, existing.Focus ?? "");
+        //                return MapToDto(existing);
         //            }
-        //            else
+
+        //            // --- Step 1: Build AiPlanRequest (TAP2 + TL-C) ---
+        //            var workStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
+        //            var workEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
+
+        //            var firstName = (user.FullName ?? "")
+        //                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        //                .FirstOrDefault() ?? "Friend";
+
+        //            // Tone hint for AI (string), respecting TAP2 and toneOverride
+        //            // Order of precedence: override -> PreferredTone -> CurrentTone -> Balanced
+        //            var toneForThisPlanEnum = user.PreferredTone ?? user.CurrentTone; // Preferred wins; else current
+        //            var toneForThisPlanStr = (toneOverride ?? ToneToAiString(toneForThisPlanEnum))
+        //                .Trim()
+        //                .ToLowerInvariant();
+
+        //            // ✅ Pull candidate tasks for this UTC day window (pending only)
+        //            var dbTasks = await _context.Tasks
+        //                .Where(t => t.UserId == userId
+        //                    && !t.Completed
+        //                    && t.DueDate >= startUtc
+        //                    && t.DueDate < endUtc)
+        //                .OrderByDescending(t => t.Priority)
+        //                .ToListAsync();
+
+        //            var taskCtx = dbTasks.Select(t => new TaskAiContext
         //            {
-        //                _logger.LogWarning("⚠️ Regeneration did not sufficiently improve quality. Keeping original plan.");
+        //                Id = t.Id,
+        //                Title = t.Title,
+        //                Description = t.Description,
+        //                Priority = t.Priority,
+        //                DueDate = t.DueDate,               // already UTC if your DB is timestamptz
+        //                EstimatedMinutes = t.EstimatedMinutes ?? 30,
+        //                EnergyLevel = t.EnergyLevel
+        //            }).ToList();
+
+        //            var aiRequest = new AiPlanRequest
+        //            {
+        //                UserId = userId,
+        //                User = new UserAiContext
+        //                {
+        //                    Id = userId,
+        //                    FirstName = firstName,
+        //                    FullName = user.FullName,
+        //                    WorkStart = workStart,
+        //                    WorkEnd = workEnd,
+        //                    PreferredTone = user.PreferredTone?.ToString()
+        //                },
+        //                Tasks = taskCtx,
+        //                Date = day, // ✅ UTC midnight
+        //                Tone = toneForThisPlanStr,
+        //                ForceRegenerate = forceRegenerate
+        //            };
+
+        //            // --- Step 2: Call AI engine (OpenAIPlannerService handles retries/fallbacks) ---
+        //            var swAi = Stopwatch.StartNew();
+        //            DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
+
+        //            var metrics = AiPlanQualityAnalyzer.Analyze(aiResult, aiRequest.Tasks.Count);
+
+        //            bool shouldRegenerate =
+        //                metrics.AvgConfidence < MinConfidenceThreshold ||
+        //                metrics.CoveragePercent < MinCoverageThreshold ||
+        //                metrics.AlignedTasksPercent < MinAlignedThreshold;
+
+        //            if (shouldRegenerate)
+        //            {
+        //                _logger.LogWarning(
+        //                    "⚠️ AI plan quality below threshold | Confidence={0} | Coverage={1}% | Aligned={2}% — retrying once.",
+        //                    metrics.AvgConfidence, metrics.CoveragePercent, metrics.AlignedTasksPercent
+        //                );
+
+        //                try
+        //                {
+        //                    var retryRequest = aiRequest with { ForceRegenerate = true };
+        //                    var retryResult = await _aiPlanner.GenerateAiPlanAsync(retryRequest);
+        //                    var retryMetrics = AiPlanQualityAnalyzer.Analyze(retryResult, aiRequest.Tasks.Count);
+
+        //                    if (retryMetrics.AvgConfidence >= MinConfidenceThreshold &&
+        //                        retryMetrics.CoveragePercent >= MinCoverageThreshold)
+        //                    {
+        //                        _logger.LogInformation("✅ Regeneration successful: plan quality improved to acceptable levels.");
+        //                        aiResult = retryResult;
+        //                    }
+        //                    else
+        //                    {
+        //                        _logger.LogWarning("⚠️ Regeneration did not sufficiently improve quality. Keeping original plan.");
+        //                    }
+        //                }
+        //                catch (Exception ex)
+        //                {
+        //                    _logger.LogError(ex, "AI plan regeneration attempt failed.");
+        //                }
         //            }
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            _logger.LogError(ex, "AI plan regeneration attempt failed.");
-        //        }
-        //    }
 
-        //    var audit = new AiPlanAudit
-        //    {
-        //        UserId = aiRequest.User.Id,
-        //        RequestedAt = aiRequest.StartedAt,
-        //        CompletedAt = DateTime.UtcNow,
-        //        LatencyMs = (long)(DateTime.UtcNow - aiRequest.StartedAt).TotalMilliseconds,
+        //            // ✅ Audit timing should be UTC
+        //            var audit = new AiPlanAudit
+        //            {
+        //                UserId = aiRequest.User.Id,
+        //                RequestedAt = DateTimeUtc.ToUtc(aiRequest.StartedAt),
+        //                CompletedAt = DateTime.UtcNow,
+        //                LatencyMs = (long)(DateTime.UtcNow - DateTimeUtc.ToUtc(aiRequest.StartedAt)).TotalMilliseconds,
 
-        //        ModelUsed = aiResult.ModelUsed ?? "unknown",
-        //        WasRegenerated = shouldRegenerate,
+        //                ModelUsed = aiResult.ModelUsed ?? "unknown",
+        //                WasRegenerated = shouldRegenerate,
 
-        //        AvgConfidence = metrics.AvgConfidence,
-        //        CoveragePercent = metrics.CoveragePercent,
-        //        AlignedTasksPercent = metrics.AlignedTasksPercent,
-        //        OverlapCount = metrics.OverlapCount,
+        //                AvgConfidence = metrics.AvgConfidence,
+        //                CoveragePercent = metrics.CoveragePercent,
+        //                AlignedTasksPercent = metrics.AlignedTasksPercent,
+        //                OverlapCount = metrics.OverlapCount,
 
-        //        RawJson = aiResult.RawJson ?? "",
-        //        CleanJson = aiResult.CleanJson ?? "",
+        //                RawJson = aiResult.RawJson ?? "",
+        //                CleanJson = aiResult.CleanJson ?? "",
 
-        //        Notes = metrics.Notes
-        //    };
+        //                Notes = metrics.Notes
+        //            };
 
-        //    _context.AiPlanAudits.Add(audit);
-        //    await _context.SaveChangesAsync();
+        //            _context.AiPlanAudits.Add(audit);
+        //            await _context.SaveChangesAsync();
 
-        //    _logger.LogInformation(
-        //        "📊 AI PLAN QUALITY | Confidence={AvgConfidence} | Coverage={Coverage}% | Aligned={Aligned}% | Overlaps={Overlaps} | Items={Items} | Status={Status}",
-        //        metrics.AvgConfidence,
-        //        metrics.CoveragePercent,
-        //        metrics.AlignedTasksPercent,
-        //        metrics.OverlapCount,
-        //        aiResult.Timeline.Count,
-        //        metrics.Status
-        //    );
+        //            _logger.LogInformation(
+        //                "📊 AI PLAN QUALITY | Confidence={AvgConfidence} | Coverage={Coverage}% | Aligned={Aligned}% | Overlaps={Overlaps} | Items={Items} | Status={Status}",
+        //                metrics.AvgConfidence,
+        //                metrics.CoveragePercent,
+        //                metrics.AlignedTasksPercent,
+        //                metrics.OverlapCount,
+        //                aiResult.Timeline.Count,
+        //                metrics.Status
+        //            );
 
-        //    if (metrics.AvgConfidence < 2.5 || metrics.CoveragePercent < 50)
-        //    {
-        //        _logger.LogWarning("⚠️ Low AI plan quality detected. Consider re-generating.");
-        //    }
+        //            if (metrics.AvgConfidence < 2.5 || metrics.CoveragePercent < 50)
+        //            {
+        //                _logger.LogWarning("⚠️ Low AI plan quality detected. Consider re-generating.");
+        //            }
 
-        //    if (aiResult == null || aiResult.Timeline.Count == 0)
-        //    {
-        //        _logger.LogWarning("⚠️ AI returned empty or invalid plan — using fallback.");
-        //        aiResult = new DailyPlanAiResult
-        //        {
-        //            Tone = "balanced",
-        //            Focus = "Fallback plan for today.",
-        //            Timeline = new List<AiPlanTimelineItem>
+        //            if (aiResult == null || aiResult.Timeline.Count == 0)
+        //            {
+        //                _logger.LogWarning("⚠️ AI returned empty or invalid plan — using fallback.");
+        //                aiResult = new DailyPlanAiResult
+        //                {
+        //                    Tone = "balanced",
+        //                    Focus = "Fallback plan for today.",
+        //                    Timeline = new List<AiPlanTimelineItem>
         //            {
         //                new AiPlanTimelineItem
         //                {
@@ -224,510 +228,509 @@ namespace FlowOS.Api.Services.Planner
         //                    Confidence = 1
         //                }
         //            }
-        //        };
-        //    }
-
-        //    _logger.LogInformation(
-        //        "✅ AI Plan Generated | Model={ModelUsed} | Tasks={ItemCount}\nTone={Tone}\nFocus={Focus}\nRawJsonLength={Len}",
-        //        aiResult?.ModelUsed ?? "(unknown)",
-        //        aiResult?.Timeline?.Count ?? 0,
-        //        aiResult?.Tone ?? "(none)",
-        //        aiResult?.Focus ?? "(none)",
-        //        aiResult?.RawJson?.Length ?? 0
-        //    );
-
-        //    swAi.Stop();
-
-        //    var rawSizeKb = aiResult.RawJson is null ? 0 : (aiResult.RawJson.Length / 1024.0);
-        //    var cleanSizeKb = aiResult.CleanJson is null ? 0 : (aiResult.CleanJson.Length / 1024.0);
-
-        //    _logger.LogInformation(
-        //        "AI_PLAN_GEN: User={UserId} Date={Date} ToneHint={ToneHint} ToneReturned={ToneReturned} Items={Items} ModelUsed={Model} RawKB={RawKb:N1} CleanKB={CleanKb:N1} Ms={Ms}ms",
-        //        userId, day.ToString("yyyy-MM-dd"), toneForThisPlanStr, aiResult.Tone, aiResult.Timeline.Count,
-        //        aiResult.ModelUsed ?? "(unknown)", rawSizeKb, cleanSizeKb, swAi.ElapsedMilliseconds);
-
-        //    // --- Step 3: Save to DB atomically (hard delete items on regenerate) ---
-        //    var swSave = Stopwatch.StartNew();
-        //    var exec = _context.Database.CreateExecutionStrategy();
-        //    DailyPlan savedPlan = null!;
-
-        //    await exec.ExecuteAsync(async () =>
-        //    {
-        //        await using var tx = await _context.Database.BeginTransactionAsync();
-
-        //        // Re-fetch plan row tracked
-        //        var plan = await _context.DailyPlans
-        //            .Include(p => p.Items)
-        //            .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == day);
-
-        //        if (plan == null)
-        //        {
-        //            plan = new DailyPlan
-        //            {
-        //                UserId = userId,
-        //                Date = day
-        //            };
-        //            _context.DailyPlans.Add(plan);
-        //            await _context.SaveChangesAsync();
-        //        }
-        //        else
-        //        {
-        //            if (plan.Items.Any())
-        //            {
-        //                _context.DailyPlanItems.RemoveRange(plan.Items);
-        //                await _context.SaveChangesAsync();
+        //                };
         //            }
-        //        }
 
-        //        // Use AI returned tone if available; otherwise keep our hinted tone
-        //        var appliedToneString = string.IsNullOrWhiteSpace(aiResult.Tone)
-        //            ? toneForThisPlanStr
-        //            : aiResult.Tone.Trim().ToLowerInvariant();
+        //            _logger.LogInformation(
+        //                "✅ AI Plan Generated | Model={ModelUsed} | Tasks={ItemCount}\nTone={Tone}\nFocus={Focus}\nRawJsonLength={Len}",
+        //                aiResult?.ModelUsed ?? "(unknown)",
+        //                aiResult?.Timeline?.Count ?? 0,
+        //                aiResult?.Tone ?? "(none)",
+        //                aiResult?.Focus ?? "(none)",
+        //                aiResult?.RawJson?.Length ?? 0
+        //            );
 
-        //        plan.Tone = appliedToneString; // stored as string on DailyPlan (soft/strict/playful/balanced)
-        //        plan.Focus = string.IsNullOrWhiteSpace(aiResult.Focus) ? (plan.Focus ?? "Your plan") : aiResult.Focus;
-        //        plan.GeneratedAt = DateTime.UtcNow;
-        //        plan.PlanJsonRaw = aiResult.RawJson ?? "";
-        //        plan.PlanJsonClean = MinifyJson(aiResult.CleanJson ?? aiResult.RawJson ?? "{}");
-        //        plan.ModelUsed = aiResult.ModelUsed;
+        //            swAi.Stop();
 
-        //        await _context.SaveChangesAsync();
+        //            var rawSizeKb = aiResult.RawJson is null ? 0 : (aiResult.RawJson.Length / 1024.0);
+        //            var cleanSizeKb = aiResult.CleanJson is null ? 0 : (aiResult.CleanJson.Length / 1024.0);
 
-        //        if (aiResult.Timeline.Any())
-        //        {
-        //            var items = aiResult.Timeline
-        //                .OrderBy(i => i.Start)
-        //                .Select(i => new DailyPlanItem
+        //            _logger.LogInformation(
+        //                "AI_PLAN_GEN: User={UserId} Date={Date} ToneHint={ToneHint} ToneReturned={ToneReturned} Items={Items} ModelUsed={Model} RawKB={RawKb:N1} CleanKB={CleanKb:N1} Ms={Ms}ms",
+        //                userId, day.ToString("yyyy-MM-dd"), toneForThisPlanStr, aiResult.Tone, aiResult.Timeline.Count,
+        //                aiResult.ModelUsed ?? "(unknown)", rawSizeKb, cleanSizeKb, swAi.ElapsedMilliseconds);
+
+        //            // --- Step 3: Save to DB atomically (hard delete items on regenerate) ---
+        //            var swSave = Stopwatch.StartNew();
+        //            var exec = _context.Database.CreateExecutionStrategy();
+        //            DailyPlan savedPlan = null!;
+
+        //            await exec.ExecuteAsync(async () =>
+        //            {
+        //                await using var tx = await _context.Database.BeginTransactionAsync();
+
+        //                var plan = await _context.DailyPlans
+        //                    .Include(p => p.Items)
+        //                    .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == day);
+
+        //                if (plan == null)
         //                {
-        //                    PlanId = plan.Id,
-        //                    TaskId = i.TaskId, // May be null since AI plan items are not directly mapped to Tasks
-        //                    Label = i.Label,
-        //                    Start = EnsureUtc(i.Start),
-        //                    End = EnsureUtc(i.End),
-        //                    Confidence = Math.Clamp(i.Confidence, 1, 5),
-        //                    NudgeAt = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : null
-        //                });
+        //                    plan = new DailyPlan
+        //                    {
+        //                        UserId = userId,
+        //                        Date = day
+        //                    };
+        //                    _context.DailyPlans.Add(plan);
+        //                    await _context.SaveChangesAsync();
+        //                }
+        //                else
+        //                {
+        //                    if (plan.Items.Any())
+        //                    {
+        //                        _context.DailyPlanItems.RemoveRange(plan.Items);
+        //                        await _context.SaveChangesAsync();
+        //                    }
+        //                }
 
-        //            await _context.DailyPlanItems.AddRangeAsync(items);
-        //            await _context.SaveChangesAsync();
+        //                var appliedToneString = string.IsNullOrWhiteSpace(aiResult.Tone)
+        //                    ? toneForThisPlanStr
+        //                    : aiResult.Tone.Trim().ToLowerInvariant();
+
+        //                plan.Tone = appliedToneString;
+        //                plan.Focus = string.IsNullOrWhiteSpace(aiResult.Focus) ? (plan.Focus ?? "Your plan") : aiResult.Focus;
+        //                plan.GeneratedAt = DateTime.UtcNow;
+        //                plan.PlanJsonRaw = aiResult.RawJson ?? "";
+        //                plan.PlanJsonClean = MinifyJson(aiResult.CleanJson ?? aiResult.RawJson ?? "{}");
+        //                plan.ModelUsed = aiResult.ModelUsed;
+
+        //                await _context.SaveChangesAsync();
+
+        //                //if (aiResult.Timeline.Any())
+        //                //{
+        //                //    var items = aiResult.Timeline
+        //                //        .OrderBy(i => i.Start)
+        //                //        .Select(i => new DailyPlanItem
+        //                //        {
+        //                //            PlanId = plan.Id,
+        //                //            TaskId = i.TaskId,
+        //                //            Label = i.Label,
+
+        //                //            // ✅ Ensure these are UTC before writing to timestamptz
+        //                //            Start = EnsureUtc(i.Start),
+        //                //            End = EnsureUtc(i.End),
+        //                //            Confidence = Math.Clamp(i.Confidence, 1, 5),
+        //                //            NudgeAt = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : null
+        //                //        });
+
+        //                //    await _context.DailyPlanItems.AddRangeAsync(items);
+        //                //    await _context.SaveChangesAsync();
+        //                //}
+
+        //                if (aiResult.Timeline.Any())
+        //                {
+        //                    var nowUtc = DateTime.UtcNow;
+
+        //                    // user working hours (UTC)
+        //                    var workStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
+        //                    var workEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
+
+        //                    //// ✅ determine realistic first start time
+        //                    //var earliest = EarliestStartUtc(
+        //                    //    nowUtc,
+        //                    //    workStart,
+        //                    //    workEnd,
+        //                    //    bufferMinutes: 5,
+        //                    //    roundToMinutes: 10
+        //                    //);
+
+        //                    // if caller passed planStartUtc, use it.
+        //                    // else fallback to your EarliestStartUtc(...) rule
+        //                    var earliest = planStartUtc ?? EarliestStartUtc(
+        //                        nowUtc,
+        //                        workStart,
+        //                        workEnd,
+        //                        bufferMinutes: 10,
+        //                        roundToMinutes: 5
+        //                    );
+
+        //                    // 1) Normalize AI times to UTC once
+        //                    var normalized = aiResult.Timeline
+        //                        .Select(i => new
+        //                        {
+        //                            i.TaskId,
+        //                            i.Label,
+        //                            StartUtc = EnsureUtc(i.Start),
+        //                            EndUtc = EnsureUtc(i.End),
+        //                            i.Confidence,
+        //                            NudgeAtUtc = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : (DateTime?)null
+        //                        })
+        //                        .ToList();
+
+        //                    // 2) Compute ONE global shift (preserve spacing)
+        //                    var minStartUtc = normalized.Min(x => x.StartUtc);
+
+        //                    var shift = minStartUtc < earliest
+        //                        ? (earliest - minStartUtc)
+        //                        : TimeSpan.Zero;
+
+        //                    // 3) Create DB items with shifted times
+        //                    var items = normalized
+        //                        .OrderBy(x => x.StartUtc)
+        //                        .Select(x =>
+        //                        {
+        //                            var start = x.StartUtc + shift;
+        //                            var end = x.EndUtc + shift;
+
+        //                            // safety: invalid duration fallback
+        //                            if (end <= start)
+        //                                end = start.AddMinutes(30);
+
+        //                            return new DailyPlanItem
+        //                            {
+        //                                PlanId = plan.Id,
+        //                                TaskId = x.TaskId,
+        //                                Label = x.Label,
+
+        //                                Start = start,
+        //                                End = end,
+
+        //                                Confidence = Math.Clamp(x.Confidence, 1, 5),
+
+        //                                // keep nudge aligned with shifted timeline
+        //                                NudgeAt = x.NudgeAtUtc.HasValue
+        //                                    ? x.NudgeAtUtc.Value + shift
+        //                                    : null
+        //                            };
+        //                        })
+        //                        .ToList();
+
+        //                    await _context.DailyPlanItems.AddRangeAsync(items);
+        //                    await _context.SaveChangesAsync();
+        //                }
+
+        //                await tx.CommitAsync();
+
+        //                savedPlan = await _context.DailyPlans
+        //                    .AsNoTracking()
+        //                    .Include(p => p.Items)
+        //                    .FirstAsync(p => p.Id == plan.Id);
+        //            });
+
+        //            swSave.Stop();
+
+        //            _logger.LogInformation(
+        //                "AI_PLAN_SAVE: User={UserId} Date={Date} Items={Items} ModelUsed={Model} RawKB={RawKb:N1} CleanKB={CleanKb:N1} SaveMs={SaveMs}ms",
+        //                userId,
+        //                day.ToString("yyyy-MM-dd"),
+        //                savedPlan.Items.Count,
+        //                savedPlan.ModelUsed ?? "(unknown)",
+        //                rawSizeKb,
+        //                cleanSizeKb,
+        //                swSave.ElapsedMilliseconds
+        //            );
+
+        //            // --- Step 3.1: Tone Learning (EV3-M + TD2 + TE2) -------------------
+        //            await ApplyToneLearningAsync(user, day, aiResult, toneForThisPlanStr);
+
+        //            // --- Step 4: Return DTO ---
+        //            return MapToDto(savedPlan);
         //        }
 
-        //        await tx.CommitAsync();
+        // ----------------- Tone Learning (EV3-M) -----------------
 
-        //        savedPlan = await _context.DailyPlans
-        //            .AsNoTracking()
-        //            .Include(p => p.Items)
-        //            .FirstAsync(p => p.Id == plan.Id);
-        //    });
-
-        //    swSave.Stop();
-
-        //    _logger.LogInformation(
-        //        "AI_PLAN_SAVE: User={UserId} Date={Date} Items={Items} ModelUsed={Model} RawKB={RawKb:N1} CleanKB={CleanKb:N1} SaveMs={SaveMs}ms",
-        //        userId,
-        //        day.ToString("yyyy-MM-dd"),
-        //        savedPlan.Items.Count,
-        //        savedPlan.ModelUsed ?? "(unknown)",
-        //        rawSizeKb,
-        //        cleanSizeKb,
-        //        swSave.ElapsedMilliseconds
-        //    );
-
-        //    // --- Step 3.1: Tone Learning (EV3-M + TD2 + TE2) -------------------
-        //    await ApplyToneLearningAsync(user, day, aiResult, toneForThisPlanStr);
-
-        //    // --- Step 4: Return DTO ---
-        //    return MapToDto(savedPlan);
-        //}
-
-        //public async Task<PlanResponseDto> GeneratePlanAsync(
-        //    string userId,
-        //    DateTime date,
-        //    string? toneOverride = null,
-        //    bool forceRegenerate = false)
         public async Task<PlanResponseDto> GeneratePlanAsync(
-                                            string userId,
-                                            DateTime date,
-                                            string? toneOverride = null,
-                                            bool forceRegenerate = false,
-                                            DateTime? planStartUtc = null // ✅ add this
-                                        )
+            string userId,
+            DateTime date,
+            string? toneOverride = null,
+            bool forceRegenerate = false,
+            DateTime? planStartUtc = null
+        )
         {
             // ✅ ALWAYS normalize incoming date to UTC day start (no Local DateTime ever)
             var startUtc = DateTimeUtc.UtcDayStart(date);
-                    var endUtc = startUtc.AddDays(1);
+            var endUtc = startUtc.AddDays(1);
 
-                    // If your DailyPlans.Date is a "date-only" semantic stored as DateTime,
-                    // keep it as a UTC midnight DateTime.
-                    var day = startUtc;
+            // If your DailyPlans.Date is a "date-only" semantic stored as DateTime,
+            // keep it as a UTC midnight DateTime.
+            var day = startUtc;
 
-                    // --- Step 0: Load user + (optionally) reuse existing plan ---
-                    var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
-                    if (user == null) throw new Exception("User not found");
+            // --- Step 0: Load user + (optionally) reuse existing plan ---
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            if (user == null) throw new Exception("User not found");
 
-                    var existing = await _context.DailyPlans
-                        .AsNoTracking()
-                        .Include(p => p.Items)
-                        .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == day);
+            var existing = await _context.DailyPlans
+                .AsNoTracking()
+                .Include(p => p.Items)
+                .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == day);
 
-                    if (existing != null && !forceRegenerate)
+            if (existing != null && !forceRegenerate)
+            {
+                _logger.LogInformation(
+                    "AI_PLAN_REUSE: User={UserId} Date={Date} Items={Items} Focus='{Focus}'",
+                    userId, day.ToString("yyyy-MM-dd"), existing.Items.Count, existing.Focus ?? "");
+                return MapToDto(existing);
+            }
+
+            // --- Step 1: Build AiPlanRequest (TAP2 + TL-C) ---
+            var workStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
+            var workEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
+
+            var firstName = (user.FullName ?? "")
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault() ?? "Friend";
+
+            var toneForThisPlanEnum = user.PreferredTone ?? user.CurrentTone;
+            var toneForThisPlanStr = (toneOverride ?? ToneToAiString(toneForThisPlanEnum))
+                .Trim()
+                .ToLowerInvariant();
+
+            // ✅ Pull candidate tasks for this UTC day window (pending only)
+            var dbTasks = await _context.Tasks
+                .Where(t => t.UserId == userId
+                    && !t.Completed
+                    && t.DueDate >= startUtc
+                    && t.DueDate < endUtc)
+                .OrderByDescending(t => t.Priority)
+                .ToListAsync();
+
+            var taskCtx = dbTasks.Select(t => new TaskAiContext
+            {
+                Id = t.Id,
+                Title = t.Title,
+                Description = t.Description,
+                Priority = t.Priority,
+                DueDate = t.DueDate,
+                EstimatedMinutes = t.EstimatedMinutes ?? 30,
+                EnergyLevel = t.EnergyLevel
+            }).ToList();
+
+            var aiRequest = new AiPlanRequest
+            {
+                UserId = userId,
+                User = new UserAiContext
+                {
+                    Id = userId,
+                    FirstName = firstName,
+                    FullName = user.FullName,
+                    WorkStart = workStart,
+                    WorkEnd = workEnd,
+                    PreferredTone = user.PreferredTone?.ToString()
+                },
+                Tasks = taskCtx,
+                Date = day, // ✅ UTC midnight
+                Tone = toneForThisPlanStr,
+                ForceRegenerate = forceRegenerate
+            };
+
+            // --- Step 2: Call AI engine ---
+            var swAi = Stopwatch.StartNew();
+            DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
+
+            var metrics = AiPlanQualityAnalyzer.Analyze(aiResult, aiRequest.Tasks.Count);
+
+            bool shouldRegenerate =
+                metrics.AvgConfidence < MinConfidenceThreshold ||
+                metrics.CoveragePercent < MinCoverageThreshold ||
+                metrics.AlignedTasksPercent < MinAlignedThreshold;
+
+            if (shouldRegenerate)
+            {
+                _logger.LogWarning(
+                    "⚠️ AI plan quality below threshold | Confidence={0} | Coverage={1}% | Aligned={2}% — retrying once.",
+                    metrics.AvgConfidence, metrics.CoveragePercent, metrics.AlignedTasksPercent
+                );
+
+                try
+                {
+                    var retryRequest = aiRequest with { ForceRegenerate = true };
+                    var retryResult = await _aiPlanner.GenerateAiPlanAsync(retryRequest);
+                    var retryMetrics = AiPlanQualityAnalyzer.Analyze(retryResult, aiRequest.Tasks.Count);
+
+                    if (retryMetrics.AvgConfidence >= MinConfidenceThreshold &&
+                        retryMetrics.CoveragePercent >= MinCoverageThreshold)
                     {
-                        _logger.LogInformation(
-                            "AI_PLAN_REUSE: User={UserId} Date={Date} Items={Items} Focus='{Focus}'",
-                            userId, day.ToString("yyyy-MM-dd"), existing.Items.Count, existing.Focus ?? "");
-                        return MapToDto(existing);
+                        _logger.LogInformation("✅ Regeneration successful: plan quality improved to acceptable levels.");
+                        aiResult = retryResult;
                     }
-
-                    // --- Step 1: Build AiPlanRequest (TAP2 + TL-C) ---
-                    var workStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
-                    var workEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
-
-                    var firstName = (user.FullName ?? "")
-                        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                        .FirstOrDefault() ?? "Friend";
-
-                    // Tone hint for AI (string), respecting TAP2 and toneOverride
-                    // Order of precedence: override -> PreferredTone -> CurrentTone -> Balanced
-                    var toneForThisPlanEnum = user.PreferredTone ?? user.CurrentTone; // Preferred wins; else current
-                    var toneForThisPlanStr = (toneOverride ?? ToneToAiString(toneForThisPlanEnum))
-                        .Trim()
-                        .ToLowerInvariant();
-
-                    // ✅ Pull candidate tasks for this UTC day window (pending only)
-                    var dbTasks = await _context.Tasks
-                        .Where(t => t.UserId == userId
-                            && !t.Completed
-                            && t.DueDate >= startUtc
-                            && t.DueDate < endUtc)
-                        .OrderByDescending(t => t.Priority)
-                        .ToListAsync();
-
-                    var taskCtx = dbTasks.Select(t => new TaskAiContext
+                    else
                     {
-                        Id = t.Id,
-                        Title = t.Title,
-                        Description = t.Description,
-                        Priority = t.Priority,
-                        DueDate = t.DueDate,               // already UTC if your DB is timestamptz
-                        EstimatedMinutes = t.EstimatedMinutes ?? 30,
-                        EnergyLevel = t.EnergyLevel
-                    }).ToList();
+                        _logger.LogWarning("⚠️ Regeneration did not sufficiently improve quality. Keeping original plan.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "AI plan regeneration attempt failed.");
+                }
+            }
 
-                    var aiRequest = new AiPlanRequest
+            // ✅ Audit timing should be UTC
+            var audit = new AiPlanAudit
+            {
+                UserId = aiRequest.User.Id,
+                RequestedAt = DateTimeUtc.ToUtc(aiRequest.StartedAt),
+                CompletedAt = DateTime.UtcNow,
+                LatencyMs = (long)(DateTime.UtcNow - DateTimeUtc.ToUtc(aiRequest.StartedAt)).TotalMilliseconds,
+
+                ModelUsed = aiResult.ModelUsed ?? "unknown",
+                WasRegenerated = shouldRegenerate,
+
+                AvgConfidence = metrics.AvgConfidence,
+                CoveragePercent = metrics.CoveragePercent,
+                AlignedTasksPercent = metrics.AlignedTasksPercent,
+                OverlapCount = metrics.OverlapCount,
+
+                RawJson = aiResult.RawJson ?? "",
+                CleanJson = aiResult.CleanJson ?? "",
+
+                Notes = metrics.Notes
+            };
+
+            _context.AiPlanAudits.Add(audit);
+            await _context.SaveChangesAsync();
+
+            if (aiResult == null || aiResult.Timeline.Count == 0)
+            {
+                _logger.LogWarning("⚠️ AI returned empty or invalid plan — using fallback.");
+                aiResult = new DailyPlanAiResult
+                {
+                    Tone = "balanced",
+                    Focus = "Fallback plan for today.",
+                    Timeline = new List<AiPlanTimelineItem>
+            {
+                new AiPlanTimelineItem
+                {
+                    Label = "Manual Planning Required",
+                    Start = DateTime.UtcNow,
+                    End = DateTime.UtcNow.AddMinutes(30),
+                    Confidence = 1
+                }
+            }
+                };
+            }
+
+            swAi.Stop();
+
+            var rawSizeKb = aiResult.RawJson is null ? 0 : (aiResult.RawJson.Length / 1024.0);
+            var cleanSizeKb = aiResult.CleanJson is null ? 0 : (aiResult.CleanJson.Length / 1024.0);
+
+            // --- Step 3: Save to DB atomically (hard delete items on regenerate) ---
+            var exec = _context.Database.CreateExecutionStrategy();
+            DailyPlan savedPlan = null!;
+
+            await exec.ExecuteAsync(async () =>
+            {
+                await using var tx = await _context.Database.BeginTransactionAsync();
+
+                var plan = await _context.DailyPlans
+                    .Include(p => p.Items)
+                    .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == day);
+
+                if (plan == null)
+                {
+                    plan = new DailyPlan
                     {
                         UserId = userId,
-                        User = new UserAiContext
-                        {
-                            Id = userId,
-                            FirstName = firstName,
-                            FullName = user.FullName,
-                            WorkStart = workStart,
-                            WorkEnd = workEnd,
-                            PreferredTone = user.PreferredTone?.ToString()
-                        },
-                        Tasks = taskCtx,
-                        Date = day, // ✅ UTC midnight
-                        Tone = toneForThisPlanStr,
-                        ForceRegenerate = forceRegenerate
+                        Date = day
                     };
-
-                    // --- Step 2: Call AI engine (OpenAIPlannerService handles retries/fallbacks) ---
-                    var swAi = Stopwatch.StartNew();
-                    DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
-
-                    var metrics = AiPlanQualityAnalyzer.Analyze(aiResult, aiRequest.Tasks.Count);
-
-                    bool shouldRegenerate =
-                        metrics.AvgConfidence < MinConfidenceThreshold ||
-                        metrics.CoveragePercent < MinCoverageThreshold ||
-                        metrics.AlignedTasksPercent < MinAlignedThreshold;
-
-                    if (shouldRegenerate)
-                    {
-                        _logger.LogWarning(
-                            "⚠️ AI plan quality below threshold | Confidence={0} | Coverage={1}% | Aligned={2}% — retrying once.",
-                            metrics.AvgConfidence, metrics.CoveragePercent, metrics.AlignedTasksPercent
-                        );
-
-                        try
-                        {
-                            var retryRequest = aiRequest with { ForceRegenerate = true };
-                            var retryResult = await _aiPlanner.GenerateAiPlanAsync(retryRequest);
-                            var retryMetrics = AiPlanQualityAnalyzer.Analyze(retryResult, aiRequest.Tasks.Count);
-
-                            if (retryMetrics.AvgConfidence >= MinConfidenceThreshold &&
-                                retryMetrics.CoveragePercent >= MinCoverageThreshold)
-                            {
-                                _logger.LogInformation("✅ Regeneration successful: plan quality improved to acceptable levels.");
-                                aiResult = retryResult;
-                            }
-                            else
-                            {
-                                _logger.LogWarning("⚠️ Regeneration did not sufficiently improve quality. Keeping original plan.");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "AI plan regeneration attempt failed.");
-                        }
-                    }
-
-                    // ✅ Audit timing should be UTC
-                    var audit = new AiPlanAudit
-                    {
-                        UserId = aiRequest.User.Id,
-                        RequestedAt = DateTimeUtc.ToUtc(aiRequest.StartedAt),
-                        CompletedAt = DateTime.UtcNow,
-                        LatencyMs = (long)(DateTime.UtcNow - DateTimeUtc.ToUtc(aiRequest.StartedAt)).TotalMilliseconds,
-
-                        ModelUsed = aiResult.ModelUsed ?? "unknown",
-                        WasRegenerated = shouldRegenerate,
-
-                        AvgConfidence = metrics.AvgConfidence,
-                        CoveragePercent = metrics.CoveragePercent,
-                        AlignedTasksPercent = metrics.AlignedTasksPercent,
-                        OverlapCount = metrics.OverlapCount,
-
-                        RawJson = aiResult.RawJson ?? "",
-                        CleanJson = aiResult.CleanJson ?? "",
-
-                        Notes = metrics.Notes
-                    };
-
-                    _context.AiPlanAudits.Add(audit);
+                    _context.DailyPlans.Add(plan);
                     await _context.SaveChangesAsync();
-
-                    _logger.LogInformation(
-                        "📊 AI PLAN QUALITY | Confidence={AvgConfidence} | Coverage={Coverage}% | Aligned={Aligned}% | Overlaps={Overlaps} | Items={Items} | Status={Status}",
-                        metrics.AvgConfidence,
-                        metrics.CoveragePercent,
-                        metrics.AlignedTasksPercent,
-                        metrics.OverlapCount,
-                        aiResult.Timeline.Count,
-                        metrics.Status
-                    );
-
-                    if (metrics.AvgConfidence < 2.5 || metrics.CoveragePercent < 50)
+                }
+                else
+                {
+                    if (plan.Items.Any())
                     {
-                        _logger.LogWarning("⚠️ Low AI plan quality detected. Consider re-generating.");
-                    }
-
-                    if (aiResult == null || aiResult.Timeline.Count == 0)
-                    {
-                        _logger.LogWarning("⚠️ AI returned empty or invalid plan — using fallback.");
-                        aiResult = new DailyPlanAiResult
-                        {
-                            Tone = "balanced",
-                            Focus = "Fallback plan for today.",
-                            Timeline = new List<AiPlanTimelineItem>
-                    {
-                        new AiPlanTimelineItem
-                        {
-                            Label = "Manual Planning Required",
-                            Start = DateTime.UtcNow,
-                            End = DateTime.UtcNow.AddMinutes(30),
-                            Confidence = 1
-                        }
-                    }
-                        };
-                    }
-
-                    _logger.LogInformation(
-                        "✅ AI Plan Generated | Model={ModelUsed} | Tasks={ItemCount}\nTone={Tone}\nFocus={Focus}\nRawJsonLength={Len}",
-                        aiResult?.ModelUsed ?? "(unknown)",
-                        aiResult?.Timeline?.Count ?? 0,
-                        aiResult?.Tone ?? "(none)",
-                        aiResult?.Focus ?? "(none)",
-                        aiResult?.RawJson?.Length ?? 0
-                    );
-
-                    swAi.Stop();
-
-                    var rawSizeKb = aiResult.RawJson is null ? 0 : (aiResult.RawJson.Length / 1024.0);
-                    var cleanSizeKb = aiResult.CleanJson is null ? 0 : (aiResult.CleanJson.Length / 1024.0);
-
-                    _logger.LogInformation(
-                        "AI_PLAN_GEN: User={UserId} Date={Date} ToneHint={ToneHint} ToneReturned={ToneReturned} Items={Items} ModelUsed={Model} RawKB={RawKb:N1} CleanKB={CleanKb:N1} Ms={Ms}ms",
-                        userId, day.ToString("yyyy-MM-dd"), toneForThisPlanStr, aiResult.Tone, aiResult.Timeline.Count,
-                        aiResult.ModelUsed ?? "(unknown)", rawSizeKb, cleanSizeKb, swAi.ElapsedMilliseconds);
-
-                    // --- Step 3: Save to DB atomically (hard delete items on regenerate) ---
-                    var swSave = Stopwatch.StartNew();
-                    var exec = _context.Database.CreateExecutionStrategy();
-                    DailyPlan savedPlan = null!;
-
-                    await exec.ExecuteAsync(async () =>
-                    {
-                        await using var tx = await _context.Database.BeginTransactionAsync();
-
-                        var plan = await _context.DailyPlans
-                            .Include(p => p.Items)
-                            .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == day);
-
-                        if (plan == null)
-                        {
-                            plan = new DailyPlan
-                            {
-                                UserId = userId,
-                                Date = day
-                            };
-                            _context.DailyPlans.Add(plan);
-                            await _context.SaveChangesAsync();
-                        }
-                        else
-                        {
-                            if (plan.Items.Any())
-                            {
-                                _context.DailyPlanItems.RemoveRange(plan.Items);
-                                await _context.SaveChangesAsync();
-                            }
-                        }
-
-                        var appliedToneString = string.IsNullOrWhiteSpace(aiResult.Tone)
-                            ? toneForThisPlanStr
-                            : aiResult.Tone.Trim().ToLowerInvariant();
-
-                        plan.Tone = appliedToneString;
-                        plan.Focus = string.IsNullOrWhiteSpace(aiResult.Focus) ? (plan.Focus ?? "Your plan") : aiResult.Focus;
-                        plan.GeneratedAt = DateTime.UtcNow;
-                        plan.PlanJsonRaw = aiResult.RawJson ?? "";
-                        plan.PlanJsonClean = MinifyJson(aiResult.CleanJson ?? aiResult.RawJson ?? "{}");
-                        plan.ModelUsed = aiResult.ModelUsed;
-
+                        _context.DailyPlanItems.RemoveRange(plan.Items);
                         await _context.SaveChangesAsync();
-
-                        //if (aiResult.Timeline.Any())
-                        //{
-                        //    var items = aiResult.Timeline
-                        //        .OrderBy(i => i.Start)
-                        //        .Select(i => new DailyPlanItem
-                        //        {
-                        //            PlanId = plan.Id,
-                        //            TaskId = i.TaskId,
-                        //            Label = i.Label,
-
-                        //            // ✅ Ensure these are UTC before writing to timestamptz
-                        //            Start = EnsureUtc(i.Start),
-                        //            End = EnsureUtc(i.End),
-                        //            Confidence = Math.Clamp(i.Confidence, 1, 5),
-                        //            NudgeAt = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : null
-                        //        });
-
-                        //    await _context.DailyPlanItems.AddRangeAsync(items);
-                        //    await _context.SaveChangesAsync();
-                        //}
-
-                        if (aiResult.Timeline.Any())
-                        {
-                            var nowUtc = DateTime.UtcNow;
-
-                            // user working hours (UTC)
-                            var workStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
-                            var workEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
-
-                            //// ✅ determine realistic first start time
-                            //var earliest = EarliestStartUtc(
-                            //    nowUtc,
-                            //    workStart,
-                            //    workEnd,
-                            //    bufferMinutes: 5,
-                            //    roundToMinutes: 10
-                            //);
-
-                            // if caller passed planStartUtc, use it.
-                            // else fallback to your EarliestStartUtc(...) rule
-                            var earliest = planStartUtc ?? EarliestStartUtc(
-                                nowUtc,
-                                workStart,
-                                workEnd,
-                                bufferMinutes: 10,
-                                roundToMinutes: 5
-                            );
-
-                            // 1) Normalize AI times to UTC once
-                            var normalized = aiResult.Timeline
-                                .Select(i => new
-                                {
-                                    i.TaskId,
-                                    i.Label,
-                                    StartUtc = EnsureUtc(i.Start),
-                                    EndUtc = EnsureUtc(i.End),
-                                    i.Confidence,
-                                    NudgeAtUtc = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : (DateTime?)null
-                                })
-                                .ToList();
-
-                            // 2) Compute ONE global shift (preserve spacing)
-                            var minStartUtc = normalized.Min(x => x.StartUtc);
-
-                            var shift = minStartUtc < earliest
-                                ? (earliest - minStartUtc)
-                                : TimeSpan.Zero;
-
-                            // 3) Create DB items with shifted times
-                            var items = normalized
-                                .OrderBy(x => x.StartUtc)
-                                .Select(x =>
-                                {
-                                    var start = x.StartUtc + shift;
-                                    var end = x.EndUtc + shift;
-
-                                    // safety: invalid duration fallback
-                                    if (end <= start)
-                                        end = start.AddMinutes(30);
-
-                                    return new DailyPlanItem
-                                    {
-                                        PlanId = plan.Id,
-                                        TaskId = x.TaskId,
-                                        Label = x.Label,
-
-                                        Start = start,
-                                        End = end,
-
-                                        Confidence = Math.Clamp(x.Confidence, 1, 5),
-
-                                        // keep nudge aligned with shifted timeline
-                                        NudgeAt = x.NudgeAtUtc.HasValue
-                                            ? x.NudgeAtUtc.Value + shift
-                                            : null
-                                    };
-                                })
-                                .ToList();
-
-                            await _context.DailyPlanItems.AddRangeAsync(items);
-                            await _context.SaveChangesAsync();
-                        }
-
-                        await tx.CommitAsync();
-
-                        savedPlan = await _context.DailyPlans
-                            .AsNoTracking()
-                            .Include(p => p.Items)
-                            .FirstAsync(p => p.Id == plan.Id);
-                    });
-
-                    swSave.Stop();
-
-                    _logger.LogInformation(
-                        "AI_PLAN_SAVE: User={UserId} Date={Date} Items={Items} ModelUsed={Model} RawKB={RawKb:N1} CleanKB={CleanKb:N1} SaveMs={SaveMs}ms",
-                        userId,
-                        day.ToString("yyyy-MM-dd"),
-                        savedPlan.Items.Count,
-                        savedPlan.ModelUsed ?? "(unknown)",
-                        rawSizeKb,
-                        cleanSizeKb,
-                        swSave.ElapsedMilliseconds
-                    );
-
-                    // --- Step 3.1: Tone Learning (EV3-M + TD2 + TE2) -------------------
-                    await ApplyToneLearningAsync(user, day, aiResult, toneForThisPlanStr);
-
-                    // --- Step 4: Return DTO ---
-                    return MapToDto(savedPlan);
+                    }
                 }
 
-        // ----------------- Tone Learning (EV3-M) -----------------
+                var appliedToneString = string.IsNullOrWhiteSpace(aiResult.Tone)
+                    ? toneForThisPlanStr
+                    : aiResult.Tone.Trim().ToLowerInvariant();
+
+                plan.Tone = appliedToneString;
+                plan.Focus = string.IsNullOrWhiteSpace(aiResult.Focus) ? (plan.Focus ?? "Your plan") : aiResult.Focus;
+                plan.GeneratedAt = DateTime.UtcNow;
+                plan.PlanJsonRaw = aiResult.RawJson ?? "";
+                plan.PlanJsonClean = MinifyJson(aiResult.CleanJson ?? aiResult.RawJson ?? "{}");
+                plan.ModelUsed = aiResult.ModelUsed;
+
+                await _context.SaveChangesAsync();
+
+                if (aiResult.Timeline.Any())
+                {
+                    var nowUtc = DateTime.UtcNow;
+
+                    var uWorkStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
+                    var uWorkEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
+
+                    // ✅ If caller passed planStartUtc, use it EXACTLY.
+                    // otherwise fallback to your EarliestStartUtc rule.
+                    var earliest = planStartUtc.HasValue
+                        ? EnsureUtc(planStartUtc.Value)
+                        : EarliestStartUtc(
+                            nowUtc,
+                            uWorkStart,
+                            uWorkEnd,
+                            bufferMinutes: 10,
+                            roundToMinutes: 5
+                        );
+
+                    // 1) Normalize AI times to UTC once
+                    var normalized = aiResult.Timeline
+                        .Select(i => new
+                        {
+                            i.TaskId,
+                            i.Label,
+                            StartUtc = EnsureUtc(i.Start),
+                            EndUtc = EnsureUtc(i.End),
+                            i.Confidence,
+                            NudgeAtUtc = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : (DateTime?)null
+                        })
+                        .ToList();
+
+                    var minStartUtc = normalized.Min(x => x.StartUtc);
+
+                    // ✅ FIX: SHIFT CAN BE NEGATIVE TOO
+                    // If AI starts at 09:00 UTC but user chose 06:30 UTC, shift becomes -02:30
+                    var shift = earliest - minStartUtc;
+
+                    var items = normalized
+                        .OrderBy(x => x.StartUtc)
+                        .Select(x =>
+                        {
+                            var start = x.StartUtc + shift;
+                            var end = x.EndUtc + shift;
+
+                            if (end <= start)
+                                end = start.AddMinutes(30);
+
+                            return new DailyPlanItem
+                            {
+                                PlanId = plan.Id,
+                                TaskId = x.TaskId,
+                                Label = x.Label,
+
+                                Start = start,
+                                End = end,
+
+                                Confidence = Math.Clamp(x.Confidence, 1, 5),
+
+                                NudgeAt = x.NudgeAtUtc.HasValue
+                                    ? x.NudgeAtUtc.Value + shift
+                                    : null
+                            };
+                        })
+                        .ToList();
+
+                    await _context.DailyPlanItems.AddRangeAsync(items);
+                    await _context.SaveChangesAsync();
+                }
+
+                await tx.CommitAsync();
+
+                savedPlan = await _context.DailyPlans
+                    .AsNoTracking()
+                    .Include(p => p.Items)
+                    .FirstAsync(p => p.Id == plan.Id);
+            });
+
+            // --- Step 3.1: Tone Learning ---
+            await ApplyToneLearningAsync(user, day, aiResult, toneForThisPlanStr);
+
+            // --- Step 4: Return DTO ---
+            return MapToDto(savedPlan);
+        }
 
         private async System.Threading.Tasks.Task ApplyToneLearningAsync(ApplicationUser user, DateTime day, DailyPlanAiResult aiResult, string toneHint)
         {
