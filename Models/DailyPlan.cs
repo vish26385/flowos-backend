@@ -19,7 +19,7 @@ namespace FlowOS.Api.Models
         [Key]
         public int Id { get; set; }
 
-        public DateTime Date { get; set; }
+        public DateOnly Date { get; set; }
 
         // Clean (final) JSON used by FlowOS to display the plan
         public string? PlanJsonClean { get; set; } = string.Empty;

@@ -25,42 +25,44 @@ namespace FlowOS.Api.Controllers
         //[HttpGet("{date}")]
         //public async Task<IActionResult> GetPlan(string date)
         //{
-        //    var userId = User.FindFirst("id")?.Value;
-        //    if (string.IsNullOrWhiteSpace(userId)) return Unauthorized();
+        //    var userId =
+        //        User.FindFirstValue(ClaimTypes.NameIdentifier) ??
+        //        User.FindFirst("id")?.Value;
 
-        //    // ✅ Parse exact format
+        //    if (string.IsNullOrWhiteSpace(userId))
+        //        return Unauthorized();
+
+        //    // Parse yyyy-MM-dd (calendar date in IST)
         //    if (!DateTime.TryParseExact(
         //            date,
         //            "yyyy-MM-dd",
         //            CultureInfo.InvariantCulture,
         //            DateTimeStyles.None,
-        //            out var parsedLocal))
+        //            out var istDate))
         //    {
-        //        return BadRequest("Invalid date. Use yyyy-MM-dd");
+        //        return BadRequest(new { message = "Invalid date. Use yyyy-MM-dd" });
         //    }
 
-        //    // ✅ CRITICAL FIX: force UTC kind
-        //    // Keep same date value, just mark it as UTC midnight
-        //    var dayUtc = DateTime.SpecifyKind(parsedLocal.Date, DateTimeKind.Utc);
+        //    var istOffset = TimeSpan.FromMinutes(330);
 
-        //    // ✅ Compare by range (recommended for timestamptz)
-        //    var nextDayUtc = dayUtc.AddDays(1);
+        //    // ✅ Convert IST date start -> UTC window
+        //    var startUtc = new DateTimeOffset(istDate.Date, istOffset).UtcDateTime;
+        //    var endUtc = startUtc.AddDays(1);
 
         //    var plan = await _context.DailyPlans
         //        .AsNoTracking()
         //        .Include(p => p.Items)
         //        .FirstOrDefaultAsync(p =>
         //            p.UserId == userId &&
-        //            p.Date >= dayUtc &&
-        //            p.Date < nextDayUtc);
+        //            p.Date >= startUtc &&
+        //            p.Date < endUtc);
 
         //    if (plan == null) return NotFound();
 
-        //    // ✅ Use your mapping (also protect Items from null)
         //    var dto = new PlanResponseDto
         //    {
         //        PlanId = plan.Id,
-        //        Date = plan.Date.ToString("yyyy-MM-dd"),
+        //        Date = date, // ✅ return the IST calendar date requested
         //        Focus = plan.Focus ?? "",
         //        Timeline = (plan.Items ?? new List<DailyPlanItem>())
         //            .OrderBy(i => i.Start)
@@ -93,37 +95,30 @@ namespace FlowOS.Api.Controllers
             if (string.IsNullOrWhiteSpace(userId))
                 return Unauthorized();
 
-            // Parse yyyy-MM-dd (calendar date in IST)
-            if (!DateTime.TryParseExact(
+            // ✅ DateOnly key (IST calendar date)
+            if (!DateOnly.TryParseExact(
                     date,
                     "yyyy-MM-dd",
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.None,
-                    out var istDate))
+                    out var planDate))
             {
                 return BadRequest(new { message = "Invalid date. Use yyyy-MM-dd" });
             }
-
-            var istOffset = TimeSpan.FromMinutes(330);
-
-            // ✅ Convert IST date start -> UTC window
-            var startUtc = new DateTimeOffset(istDate.Date, istOffset).UtcDateTime;
-            var endUtc = startUtc.AddDays(1);
 
             var plan = await _context.DailyPlans
                 .AsNoTracking()
                 .Include(p => p.Items)
                 .FirstOrDefaultAsync(p =>
                     p.UserId == userId &&
-                    p.Date >= startUtc &&
-                    p.Date < endUtc);
+                    p.Date == planDate);
 
             if (plan == null) return NotFound();
 
             var dto = new PlanResponseDto
             {
                 PlanId = plan.Id,
-                Date = date, // ✅ return the IST calendar date requested
+                Date = plan.Date.ToString("yyyy-MM-dd"),
                 Focus = plan.Focus ?? "",
                 Timeline = (plan.Items ?? new List<DailyPlanItem>())
                     .OrderBy(i => i.Start)

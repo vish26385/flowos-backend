@@ -19,11 +19,11 @@ namespace FlowOS.Api.Controllers
             _plannerService = plannerService;
         }
 
-        // POST /api/plan/generate?date=2026-02-15&planStartLocal=2026-02-15T23:30:00+05:30
+        //// POST /api/plan/generate?date=2026-02-15&planStartLocal=2026-02-15T23:30:00+05:30        
         //[HttpPost("generate")]
         //public async Task<IActionResult> Generate(
-        //    [FromQuery] string? date = null,
-        //    [FromQuery] DateTimeOffset? planStartLocal = null)
+        //[FromQuery] string? date = null,
+        //[FromQuery] DateTimeOffset? planStartLocal = null)
         //{
         //    var userId =
         //        User.FindFirstValue(ClaimTypes.NameIdentifier) ??
@@ -32,7 +32,7 @@ namespace FlowOS.Api.Controllers
         //    if (string.IsNullOrEmpty(userId))
         //        return Unauthorized();
 
-        //    // IST offset for now (later: per-user timezone)
+        //    // IST offset (later: per-user timezone)
         //    var userOffset = TimeSpan.FromMinutes(330);
 
         //    // ✅ If date not provided, default to TODAY in IST
@@ -42,28 +42,32 @@ namespace FlowOS.Api.Controllers
         //        date = istNow.ToString("yyyy-MM-dd");
         //    }
 
-        //    if (!DateTime.TryParse(date, out var day))
-        //        return BadRequest(new { message = "Invalid date. Use yyyy-MM-dd." });
-
-        //    day = day.Date;
-
-        //    DateTime? planStartUtc = null;
-
-        //    if (planStartLocal.HasValue)
+        //    // ✅ Parse strict IST calendar date (yyyy-MM-dd)
+        //    if (!DateTime.TryParseExact(
+        //            date,
+        //            "yyyy-MM-dd",
+        //            CultureInfo.InvariantCulture,
+        //            DateTimeStyles.None,
+        //            out var istDate))
         //    {
-        //        // If client sends no offset (rare), treat it as IST
-        //        var dto = planStartLocal.Value;
-        //        if (dto.Offset == TimeSpan.Zero && dto.DateTime.Kind == DateTimeKind.Unspecified)
-        //        {
-        //            dto = new DateTimeOffset(dto.DateTime, userOffset);
-        //        }
-
-        //        planStartUtc = dto.UtcDateTime;
+        //        return BadRequest(new { message = "Invalid date. Use yyyy-MM-dd." });
         //    }
 
+        //    // ✅ Date-only (IST calendar date) passed into service
+        //    var istDay = istDate.Date;
+
+        //    // ✅ Convert chosen planStartLocal -> UTC (client sends +05:30)
+        //    DateTime? planStartUtc = null;
+        //    if (planStartLocal.HasValue)
+        //    {
+        //        planStartUtc = planStartLocal.Value.UtcDateTime;
+        //    }
+
+        //    // ✅ IMPORTANT:
+        //    // Your service expects `date` as IST date-only and will build IST->UTC window itself
         //    var dtoResult = await _plannerService.GeneratePlanAsync(
         //        userId,
-        //        day,
+        //        istDay,
         //        toneOverride: null,
         //        forceRegenerate: true,
         //        planStartUtc: planStartUtc
@@ -87,26 +91,23 @@ namespace FlowOS.Api.Controllers
             // IST offset (later: per-user timezone)
             var userOffset = TimeSpan.FromMinutes(330);
 
-            // ✅ If date not provided, default to TODAY in IST
+            // ✅ If date not provided, default to TODAY in IST (yyyy-MM-dd)
             if (string.IsNullOrWhiteSpace(date))
             {
                 var istNow = DateTimeOffset.UtcNow.ToOffset(userOffset);
                 date = istNow.ToString("yyyy-MM-dd");
             }
 
-            // ✅ Parse strict IST calendar date (yyyy-MM-dd)
-            if (!DateTime.TryParseExact(
+            // ✅ Parse strict IST calendar date (yyyy-MM-dd) -> DateOnly
+            if (!DateOnly.TryParseExact(
                     date,
                     "yyyy-MM-dd",
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.None,
-                    out var istDate))
+                    out var istDay))
             {
                 return BadRequest(new { message = "Invalid date. Use yyyy-MM-dd." });
             }
-
-            // ✅ Date-only (IST calendar date) passed into service
-            var istDay = istDate.Date;
 
             // ✅ Convert chosen planStartLocal -> UTC (client sends +05:30)
             DateTime? planStartUtc = null;
@@ -115,8 +116,7 @@ namespace FlowOS.Api.Controllers
                 planStartUtc = planStartLocal.Value.UtcDateTime;
             }
 
-            // ✅ IMPORTANT:
-            // Your service expects `date` as IST date-only and will build IST->UTC window itself
+            // ✅ Service expects IST calendar DateOnly and will build IST->UTC window internally
             var dtoResult = await _plannerService.GeneratePlanAsync(
                 userId,
                 istDay,
