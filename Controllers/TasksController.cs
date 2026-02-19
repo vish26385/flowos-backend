@@ -266,17 +266,42 @@ namespace FlowOS.Api.Controllers
         //[HttpDelete("{id}")]
         //public async Task<IActionResult> DeleteTask(int id)
         //{
-        //    var userId = User.FindFirst("id")?.Value; // from JWT (string)
+        //    var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+        //                 ?? User.FindFirst("id")?.Value;
 
-        //    if (userId == null)
+        //    if (string.IsNullOrEmpty(userId))
         //        return Unauthorized();
 
-        //    var task = await _context.Tasks.FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
+        //    // Load the task first (we need its due date day)
+        //    var task = await _context.Tasks
+        //        .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
 
-        //    if (task == null) return NotFound();
+        //    if (task == null)
+        //        return NotFound();
 
+        //    // ✅ Task due date is stored as UTC in your DB (timestamptz)
+        //    // We will delete the plan for the SAME UTC day as the task due date.
+        //    var dayUtc = DateTime.SpecifyKind(task.DueDate.Date, DateTimeKind.Utc);
+
+        //    await using var tx = await _context.Database.BeginTransactionAsync();
+
+        //    // 1) Delete the task
         //    _context.Tasks.Remove(task);
         //    await _context.SaveChangesAsync();
+
+        //    // 2) Delete the plan for that day (if exists)
+        //    // Because DailyPlan -> DailyPlanItems is Cascade delete, items will delete automatically.
+        //    var plan = await _context.DailyPlans
+        //        .Include(p => p.Items)
+        //        .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == dayUtc);
+
+        //    if (plan != null)
+        //    {
+        //        _context.DailyPlans.Remove(plan);
+        //        await _context.SaveChangesAsync();
+        //    }
+
+        //    await tx.CommitAsync();
 
         //    return NoContent();
         //}
@@ -291,28 +316,35 @@ namespace FlowOS.Api.Controllers
             if (string.IsNullOrEmpty(userId))
                 return Unauthorized();
 
-            // Load the task first (we need its due date day)
             var task = await _context.Tasks
                 .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
 
             if (task == null)
                 return NotFound();
 
-            // ✅ Task due date is stored as UTC in your DB (timestamptz)
-            // We will delete the plan for the SAME UTC day as the task due date.
-            var dayUtc = DateTime.SpecifyKind(task.DueDate.Date, DateTimeKind.Utc);
+            var userOffset = TimeSpan.FromMinutes(330); // IST
+
+            // ✅ Convert task UTC dueDate → IST calendar day
+            var istDate = new DateTimeOffset(task.DueDate, TimeSpan.Zero)
+                .ToOffset(userOffset)
+                .Date;
+
+            // ✅ Convert IST midnight → UTC instant (your plan.Date key)
+            var istMidnightLocal = DateTime.SpecifyKind(istDate, DateTimeKind.Unspecified);
+            var planDateUtc = new DateTimeOffset(istMidnightLocal, userOffset).UtcDateTime;
 
             await using var tx = await _context.Database.BeginTransactionAsync();
 
-            // 1) Delete the task
+            // 1️⃣ Delete task
             _context.Tasks.Remove(task);
             await _context.SaveChangesAsync();
 
-            // 2) Delete the plan for that day (if exists)
-            // Because DailyPlan -> DailyPlanItems is Cascade delete, items will delete automatically.
+            // 2️⃣ Delete plan using IST-derived key
             var plan = await _context.DailyPlans
                 .Include(p => p.Items)
-                .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == dayUtc);
+                .FirstOrDefaultAsync(p =>
+                    p.UserId == userId &&
+                    p.Date == planDateUtc);
 
             if (plan != null)
             {
