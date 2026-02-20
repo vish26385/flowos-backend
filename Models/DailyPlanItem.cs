@@ -21,7 +21,14 @@ namespace FlowOS.Api.Models
         // Confidence score (1–5) to show AI certainty
         public int Confidence { get; set; } = 3;
 
-        // When to send a nudge notification
+        // ✅ Start reminder: 5 minutes before Start (UTC)
         public DateTime? NudgeAt { get; set; }
+        public DateTime? NudgeSentAtUtc { get; set; }
+
+        // ✅ End reminder: 5 minutes before End (UTC)
+        public DateTime? EndNudgeAtUtc { get; set; }
+        public DateTime? EndNudgeSentAtUtc { get; set; }
+
+        public string? LastNudgeError { get; set; }
     }
 }

@@ -450,11 +450,39 @@ namespace FlowOS.Api.Services.Planner
                                 PlanId = plan.Id,
                                 TaskId = x.TaskId,
                                 Label = x.Label,
+
                                 Start = start,
                                 End = end,
+
                                 Confidence = Math.Clamp(x.Confidence, 1, 5),
-                                NudgeAt = x.NudgeAtUtc.HasValue ? x.NudgeAtUtc.Value + shift : null
+
+                                // ✅ Start reminder = 5 min before start
+                                NudgeAt = (start.AddMinutes(-5) <= nowUtc)
+                                ? nowUtc.AddSeconds(10)           // if already late, fire ASAP
+                                : start.AddMinutes(-5),
+
+                                NudgeSentAtUtc = null,
+
+                                // ✅ End reminder = 5 min before end
+                                EndNudgeAtUtc = (end.AddMinutes(-5) <= nowUtc)
+                                ? nowUtc.AddSeconds(15)           // if already late, fire ASAP
+                                : end.AddMinutes(-5),
+
+                                EndNudgeSentAtUtc = null,
+
+                                LastNudgeError = null
                             };
+
+                            //return new DailyPlanItem
+                            //{
+                            //    PlanId = plan.Id,
+                            //    TaskId = x.TaskId,
+                            //    Label = x.Label,
+                            //    Start = start,
+                            //    End = end,
+                            //    Confidence = Math.Clamp(x.Confidence, 1, 5),
+                            //    NudgeAt = x.NudgeAtUtc.HasValue ? x.NudgeAtUtc.Value + shift : null
+                            //};
                         })
                         .ToList();
 

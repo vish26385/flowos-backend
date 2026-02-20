@@ -96,6 +96,47 @@ namespace FlowOS.Api.Data
             .HasForeignKey(i => i.TaskId)
             .OnDelete(DeleteBehavior.SetNull);
 
+            modelBuilder.Entity<DailyPlanItem>()
+                .Property(i => i.Start)
+                .HasConversion(
+                    v => DateTime.SpecifyKind(v, DateTimeKind.Utc),
+                    v => DateTime.SpecifyKind(v, DateTimeKind.Utc)
+                );
+
+            modelBuilder.Entity<DailyPlanItem>()
+                .Property(i => i.End)
+                .HasConversion(
+                    v => DateTime.SpecifyKind(v, DateTimeKind.Utc),
+                    v => DateTime.SpecifyKind(v, DateTimeKind.Utc)
+                );
+
+            modelBuilder.Entity<DailyPlanItem>()
+                .Property(i => i.NudgeAt)
+                .HasConversion(
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v,
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v
+                );
+
+            modelBuilder.Entity<DailyPlanItem>()
+                .Property(i => i.NudgeSentAtUtc)
+                .HasConversion(
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v,
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v
+                );
+
+            modelBuilder.Entity<DailyPlanItem>()
+                .Property(i => i.EndNudgeAtUtc)
+                .HasConversion(
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v,
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v
+                );
+
+            modelBuilder.Entity<DailyPlanItem>()
+                .Property(i => i.EndNudgeSentAtUtc)
+                .HasConversion(
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v,
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v
+                );
         }
     }
 }
