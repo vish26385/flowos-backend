@@ -222,6 +222,7 @@ namespace FlowOS.Api.Services.Notifications
                 .Include(i => i.Plan)
                 .Where(i =>
                     i.Plan != null &&
+                    i.TaskId != null &&                 // ✅ ONLY real tasks
                     i.NudgeAt != null &&
                     i.NudgeAt <= nowUtc &&
                     i.NudgeSentAtUtc == null
@@ -245,6 +246,7 @@ namespace FlowOS.Api.Services.Notifications
                 .Include(i => i.Plan)
                 .Where(i =>
                     i.Plan != null &&
+                    i.TaskId != null &&                 // ✅ ONLY real tasks
                     i.EndNudgeAtUtc != null &&
                     i.EndNudgeAtUtc <= nowUtc &&
                     i.EndNudgeSentAtUtc == null
@@ -281,7 +283,7 @@ namespace FlowOS.Api.Services.Notifications
             var itemIds = due.Select(x => x.ItemId).Distinct().ToList();
             var itemsToUpdate = await db.DailyPlanItems
                 .Include(i => i.Plan)
-                .Where(i => itemIds.Contains(i.Id))
+                .Where(i => itemIds.Contains(i.Id) && i.TaskId != null)   // ✅ ONLY real tasks
                 .ToListAsync(ct);
 
             foreach (var n in due.OrderBy(x => x.WhenUtc))
