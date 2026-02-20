@@ -46,23 +46,22 @@ namespace FlowOS.Api.Services.Planner
 
         //public async Task<PlanResponseDto> GeneratePlanAsync(
         //    string userId,
-        //    DateTime date,
+        //    DateOnly dateKey,                 // ✅ IST calendar date key
         //    string? toneOverride = null,
         //    bool forceRegenerate = false,
         //    DateTime? planStartUtc = null
         //)
         //{
-        //    var userOffset = TimeSpan.FromMinutes(330); // IST
-
-        //    // ✅ IST calendar date key (date-only)
-        //    var istDate = DateOnly.FromDateTime(date.Date);
+        //    var userOffset = TimeSpan.FromMinutes(330); // IST (+05:30)
 
         //    // ✅ IST day window -> UTC window (for task filtering)
-        //    var istStartLocal = new DateTime(date.Year, date.Month, date.Day, 0, 0, 0, DateTimeKind.Unspecified);
-        //    var istEndLocal = istStartLocal.AddDays(1);
+        //    var istStartLocal = DateTime.SpecifyKind(
+        //        dateKey.ToDateTime(TimeOnly.MinValue),
+        //        DateTimeKind.Unspecified
+        //    );
 
         //    var startUtc = new DateTimeOffset(istStartLocal, userOffset).UtcDateTime;
-        //    var endUtc = new DateTimeOffset(istEndLocal, userOffset).UtcDateTime;
+        //    var endUtc = startUtc.AddDays(1);
 
         //    // --- Step 0: Load user + reuse existing plan (unless forceRegenerate) ---
         //    var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
@@ -71,7 +70,7 @@ namespace FlowOS.Api.Services.Planner
         //    var existing = await _context.DailyPlans
         //        .AsNoTracking()
         //        .Include(p => p.Items)
-        //        .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == istDate);
+        //        .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == dateKey);
 
         //    if (existing != null && !forceRegenerate)
         //        return MapToDto(existing);
@@ -122,9 +121,10 @@ namespace FlowOS.Api.Services.Planner
         //            PreferredTone = user.PreferredTone?.ToString()
         //        },
         //        Tasks = taskCtx,
-        //        // ✅ keep AI request date as UTC anchor if your AI expects DateTime:
-        //        // use startUtc (UTC instant for IST midnight) only for AI context, not DB key
+
+        //        // ✅ If your AI expects DateTime, give it the UTC anchor for IST midnight
         //        Date = startUtc,
+
         //        Tone = toneForThisPlanStr,
         //        ForceRegenerate = forceRegenerate
         //    };
@@ -161,14 +161,14 @@ namespace FlowOS.Api.Services.Planner
 
         //        var plan = await _context.DailyPlans
         //            .Include(p => p.Items)
-        //            .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == istDate);
+        //            .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == dateKey);
 
         //        if (plan == null)
         //        {
         //            plan = new DailyPlan
         //            {
         //                UserId = userId,
-        //                Date = istDate
+        //                Date = dateKey // ✅ DateOnly stored
         //            };
         //            _context.DailyPlans.Add(plan);
         //            await _context.SaveChangesAsync();
@@ -198,6 +198,7 @@ namespace FlowOS.Api.Services.Planner
         //        if (aiResult.Timeline.Any())
         //        {
         //            var nowUtc = DateTime.UtcNow;
+
         //            var uWorkStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
         //            var uWorkEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
 
@@ -253,20 +254,24 @@ namespace FlowOS.Api.Services.Planner
         //            .FirstAsync(p => p.Id == plan.Id);
         //    });
 
-        //    // Tone learning can still use IST day as key if your method accepts DateTime:
-        //    // convert DateOnly -> DateTime
-        //    await ApplyToneLearningAsync(user, istDate.ToDateTime(TimeOnly.MinValue), aiResult, toneForThisPlanStr);
+        //    // ✅ Tone learning: convert DateOnly -> DateTime at IST midnight (Kind Unspecified is fine)
+        //    await ApplyToneLearningAsync(
+        //        user,
+        //        dateKey.ToDateTime(TimeOnly.MinValue),
+        //        aiResult,
+        //        toneForThisPlanStr
+        //    );
 
         //    return MapToDto(savedPlan);
         //}
 
         public async Task<PlanResponseDto> GeneratePlanAsync(
-            string userId,
-            DateOnly dateKey,                 // ✅ IST calendar date key
-            string? toneOverride = null,
-            bool forceRegenerate = false,
-            DateTime? planStartUtc = null
-        )
+    string userId,
+    DateOnly dateKey,                 // ✅ IST calendar date key
+    string? toneOverride = null,
+    bool forceRegenerate = false,
+    DateTime? planStartUtc = null
+)
         {
             var userOffset = TimeSpan.FromMinutes(330); // IST (+05:30)
 
@@ -338,7 +343,7 @@ namespace FlowOS.Api.Services.Planner
                 },
                 Tasks = taskCtx,
 
-                // ✅ If your AI expects DateTime, give it the UTC anchor for IST midnight
+                // ✅ For AI context (not DB key): UTC anchor corresponding to IST midnight
                 Date = startUtc,
 
                 Tone = toneForThisPlanStr,
@@ -384,13 +389,14 @@ namespace FlowOS.Api.Services.Planner
                     plan = new DailyPlan
                     {
                         UserId = userId,
-                        Date = dateKey // ✅ DateOnly stored
+                        Date = dateKey
                     };
                     _context.DailyPlans.Add(plan);
                     await _context.SaveChangesAsync();
                 }
                 else
                 {
+                    // hard delete old items so nudges reset cleanly on regenerate
                     if (plan.Items.Any())
                     {
                         _context.DailyPlanItems.RemoveRange(plan.Items);
@@ -418,10 +424,18 @@ namespace FlowOS.Api.Services.Planner
                     var uWorkStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
                     var uWorkEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
 
+                    // ✅ If caller passed planStartUtc, use it EXACTLY (must be UTC)
                     var earliest = planStartUtc.HasValue
                         ? EnsureUtc(planStartUtc.Value)
-                        : EarliestStartUtc(nowUtc, uWorkStart, uWorkEnd, bufferMinutes: 10, roundToMinutes: 5);
+                        : EarliestStartUtc(
+                            nowUtc,
+                            uWorkStart,
+                            uWorkEnd,
+                            bufferMinutes: 10,
+                            roundToMinutes: 5
+                        );
 
+                    // 1) Normalize AI times to UTC once
                     var normalized = aiResult.Timeline
                         .Select(i => new
                         {
@@ -429,21 +443,33 @@ namespace FlowOS.Api.Services.Planner
                             i.Label,
                             StartUtc = EnsureUtc(i.Start),
                             EndUtc = EnsureUtc(i.End),
-                            i.Confidence,
-                            NudgeAtUtc = i.NudgeAt.HasValue ? EnsureUtc(i.NudgeAt.Value) : (DateTime?)null
+                            i.Confidence
                         })
                         .ToList();
 
                     var minStartUtc = normalized.Min(x => x.StartUtc);
                     var shift = earliest - minStartUtc;
 
+                    // ✅ Only create items for TaskId != null? (NO)
+                    // We will store ALL timeline blocks, but send nudges only when TaskId != null in worker.
+                    // That keeps UI timeline complete.
                     var items = normalized
                         .OrderBy(x => x.StartUtc)
                         .Select(x =>
                         {
                             var start = x.StartUtc + shift;
                             var end = x.EndUtc + shift;
-                            if (end <= start) end = start.AddMinutes(30);
+
+                            if (end <= start)
+                                end = start.AddMinutes(30);
+
+                            // ✅ deterministic nudges
+                            // If already late (nudge time passed), schedule ASAP so you still get a reminder.
+                            var startNudge = start.AddMinutes(-5);
+                            if (startNudge <= nowUtc) startNudge = nowUtc.AddSeconds(10);
+
+                            var endNudge = end.AddMinutes(-5);
+                            if (endNudge <= nowUtc) endNudge = nowUtc.AddSeconds(15);
 
                             return new DailyPlanItem
                             {
@@ -451,38 +477,22 @@ namespace FlowOS.Api.Services.Planner
                                 TaskId = x.TaskId,
                                 Label = x.Label,
 
+                                // ✅ store as UTC instants
                                 Start = start,
                                 End = end,
 
                                 Confidence = Math.Clamp(x.Confidence, 1, 5),
 
-                                // ✅ Start reminder = 5 min before start
-                                NudgeAt = (start.AddMinutes(-5) <= nowUtc)
-                                ? nowUtc.AddSeconds(10)           // if already late, fire ASAP
-                                : start.AddMinutes(-5),
-
+                                // ✅ start nudge
+                                NudgeAt = startNudge,
                                 NudgeSentAtUtc = null,
 
-                                // ✅ End reminder = 5 min before end
-                                EndNudgeAtUtc = (end.AddMinutes(-5) <= nowUtc)
-                                ? nowUtc.AddSeconds(15)           // if already late, fire ASAP
-                                : end.AddMinutes(-5),
-
+                                // ✅ end nudge
+                                EndNudgeAtUtc = endNudge,
                                 EndNudgeSentAtUtc = null,
 
                                 LastNudgeError = null
                             };
-
-                            //return new DailyPlanItem
-                            //{
-                            //    PlanId = plan.Id,
-                            //    TaskId = x.TaskId,
-                            //    Label = x.Label,
-                            //    Start = start,
-                            //    End = end,
-                            //    Confidence = Math.Clamp(x.Confidence, 1, 5),
-                            //    NudgeAt = x.NudgeAtUtc.HasValue ? x.NudgeAtUtc.Value + shift : null
-                            //};
                         })
                         .ToList();
 
@@ -498,7 +508,7 @@ namespace FlowOS.Api.Services.Planner
                     .FirstAsync(p => p.Id == plan.Id);
             });
 
-            // ✅ Tone learning: convert DateOnly -> DateTime at IST midnight (Kind Unspecified is fine)
+            // ✅ Tone learning: DateOnly -> DateTime (IST calendar key)
             await ApplyToneLearningAsync(
                 user,
                 dateKey.ToDateTime(TimeOnly.MinValue),
