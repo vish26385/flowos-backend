@@ -376,7 +376,7 @@ namespace FlowOS.Api.Services.Planner
 
             // --- Step 2: Call AI engine ---
             DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
-
+            _logger.LogInformation("AI Clean JSON: {Json}", aiResult.CleanJson ?? aiResult.RawJson);
             var validTaskIds = dbTasks.Select(t => t.Id).ToHashSet();
 
             foreach (var item in aiResult.Timeline)
@@ -387,7 +387,7 @@ namespace FlowOS.Api.Services.Planner
                     item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
                 }
             }
-
+            _logger.LogInformation("AI Clean JSON: {Json}", aiResult.CleanJson ?? aiResult.RawJson);
             if (aiResult == null || aiResult.Timeline == null || aiResult.Timeline.Count == 0)
             {
                 aiResult = new DailyPlanAiResult
