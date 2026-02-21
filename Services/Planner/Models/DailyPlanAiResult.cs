@@ -15,11 +15,13 @@ namespace FlowOS.Api.Services.Planner.Models
         /// <summary>
         /// Tone actually used by the AI ("soft" | "strict" | "playful" | "balanced").
         /// </summary>
+        [JsonPropertyName("tone")]
         public required string Tone { get; set; } = "balanced";
 
         /// <summary>
         /// The day's main theme or focus line (e.g., "Deep Work: FlowOS Planner refactor").
         /// </summary>
+        [JsonPropertyName("focus")]
         public string Focus { get; set; } = "";
 
         /// <summary>
@@ -35,6 +37,7 @@ namespace FlowOS.Api.Services.Planner.Models
         /// <summary>
         /// The scheduled timeline items for the day, in chronological order.
         /// </summary>
+        [JsonPropertyName("items")]
         public List<AiPlanTimelineItem> Timeline { get; set; } = new();
 
         /// <summary>

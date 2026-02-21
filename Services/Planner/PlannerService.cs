@@ -268,25 +268,48 @@ namespace FlowOS.Api.Services.Planner
 
         static int? TryMapTaskIdByTitle(string label, List<Task> dbTasks)
         {
-            label = label.Trim().ToLowerInvariant();
+            label = (label ?? "").Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(label) || dbTasks.Count == 0) return null;
 
-            // very simple contains-match
-            var match = dbTasks
-                .Select(t => new { t.Id, Title = (t.Title ?? "").Trim().ToLowerInvariant() })
+            var best = dbTasks
+                .Select(t =>
+                {
+                    var title = (t.Title ?? "").Trim().ToLowerInvariant();
+                    return new
+                    {
+                        t.Id,
+                        Title = title,
+                        Score = SimilarityScore(label, title)
+                    };
+                })
                 .Where(x => x.Title.Length > 0)
-                .OrderByDescending(x => SimilarityScore(label, x.Title))
+                .OrderByDescending(x => x.Score)
                 .FirstOrDefault();
 
-            return match != null && SimilarityScore(label, match.Title) >= 0.6
-                ? match.Id
-                : null;
+            // Token-overlap threshold (tune if needed)
+            return best != null && best.Score >= 0.45 ? best.Id : null;
         }
 
-        // placeholder scoring: you can start with contains logic
         static double SimilarityScore(string a, string b)
         {
-            if (a.Contains(b) || b.Contains(a)) return 1.0;
-            return 0.0;
+            static HashSet<string> Tokens(string s)
+            {
+                return s.Split(new[] { ' ', ',', '.', ';', ':', '-', '_', '/', '\\', '|', '(', ')', '[', ']', '{', '}', '"', '\'' },
+                               StringSplitOptions.RemoveEmptyEntries)
+                        .Select(x => x.Trim())
+                        .Where(x => x.Length >= 3) // ignore very short words
+                        .ToHashSet();
+            }
+
+            var ta = Tokens(a);
+            var tb = Tokens(b);
+
+            if (ta.Count == 0 || tb.Count == 0) return 0;
+
+            int intersect = ta.Intersect(tb).Count();
+            int denom = Math.Max(ta.Count, tb.Count);
+
+            return denom == 0 ? 0 : (double)intersect / denom;
         }
 
         public async Task<PlanResponseDto> GeneratePlanAsync(
@@ -377,17 +400,27 @@ namespace FlowOS.Api.Services.Planner
             // --- Step 2: Call AI engine ---
             DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
             _logger.LogInformation("AI Clean JSON: {Json}", aiResult.CleanJson ?? aiResult.RawJson);
+
             var validTaskIds = dbTasks.Select(t => t.Id).ToHashSet();
 
             foreach (var item in aiResult.Timeline)
             {
+                // If AI gave an id but it's invalid → try remap by title
                 if (item.TaskId.HasValue && !validTaskIds.Contains(item.TaskId.Value))
                 {
-                    // AI invented / invalid id
                     item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
                 }
+
+                // If AI omitted taskId → try map by title
+                if (item.TaskId == null)
+                {
+                    item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
+                }
+
+                _logger.LogInformation("AI item mapped: label='{Label}' taskId={TaskId}",
+                    item.Label, item.TaskId?.ToString() ?? "null");
             }
-            _logger.LogInformation("AI Clean JSON: {Json}", aiResult.CleanJson ?? aiResult.RawJson);
+
             if (aiResult == null || aiResult.Timeline == null || aiResult.Timeline.Count == 0)
             {
                 aiResult = new DailyPlanAiResult

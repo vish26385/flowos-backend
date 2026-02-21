@@ -390,53 +390,122 @@ Tasks (sorted by priority desc, then due asc):
 
             // ---- Compose RULES PROMPT (hard constraints + example) ----
             // NOTE: This is *assistant* content in P3; it enforces JSON-only, schema-conformant output.
+
             var rulesPrompt = @"
 # OUTPUT RULES (STRICT — CRITICAL)
 - Output JSON ONLY. No extra text, no markdown, no commentary outside JSON.
 - The JSON MUST validate against the provided JSON Schema: `flowos_daily_plan`.
-- Every `items[i]` must have: `label` (2–5 words, starts with a verb), `start`, `end`, `confidence` (1–5).
+
+# REQUIRED FIELDS
+- Every `items[i]` MUST contain: `taskId`, `label`, `start`, `end`, `confidence` (1–5).
+- `nudgeAt` is optional and may be null.
+
+# TASK ID RULES (VERY IMPORTANT)
+- If an item represents a real task from the input list (`id:###; title:...`), you MUST set `taskId` to that exact numeric id.
+- If an item is NOT a real task (break / walk / planning / reflection / buffer), you MUST set `taskId` = null.
+- NEVER invent task ids.
+- NEVER omit `taskId`.
+
+# LABEL RULES
+- If `taskId` != null:
+  - `label` MUST be the EXACT task title from the input (do NOT shorten or rename).
+  - Do NOT use generic labels like ""Complete task 1"" or ""Priority task"".
+- If `taskId` == null:
+  - `label` should be 2–5 words and start with a verb (e.g., ""Stretch break"", ""Take a walk"").
+
+# TIME RULES
 - `start`, `end`, and (optional) `nudgeAt` MUST be ISO 8601 with trailing `Z` (UTC), e.g. `2025-10-26T09:00:00Z`.
 - Do NOT schedule outside the provided work window.
 - Do NOT overlap time blocks.
+
+# QUALITY RULES
 - Keep plan achievable (avoid cramming; allow breathing room).
-- Tone must be a single value from: `soft`, `strict`, `playful`, `balanced`. You may adjust at most ±1 tone level from the requested hint if it truly benefits the user today. If you adjust, set `tone` to the FINAL tone used.
-- `carryOverTaskIds` must contain ONLY task ids that are not scheduled in `items`. Prefer ≤ 3 carries, unless tone=`strict` (then up to 5).
+- Tone must be a single value from: `soft`, `strict`, `playful`, `balanced`.
+- You may adjust at most ±1 tone level from the requested hint if it truly benefits the user today.
+- If you adjust, set `tone` to the FINAL tone used.
+- `carryOverTaskIds` must contain ONLY task ids that are not scheduled in `items`.
+- Prefer ≤ 3 carries, unless tone=`strict` (then up to 5).
 
 # EXAMPLE OUTPUT (illustrative; your actual items depend on input)
 {
   ""tone"": ""balanced"",
   ""focus"": ""Make clear progress on key work and keep energy steady"",
   ""items"": [
-    {{
-      ""label"": ""Draft report intro"",
+    {
+      ""taskId"": 101,
+      ""label"": ""Draft quarterly report"",
       ""start"": ""2025-10-26T09:00:00Z"",
       ""end"": ""2025-10-26T10:15:00Z"",
       ""confidence"": 4,
       ""nudgeAt"": ""2025-10-26T08:55:00Z""
-    }},
-    {{
+    },
+    {
+      ""taskId"": null,
       ""label"": ""Stretch break"",
       ""start"": ""2025-10-26T10:15:00Z"",
       ""end"": ""2025-10-26T10:25:00Z"",
       ""confidence"": 5
-    }},
-    {{
-      ""label"": ""Review email triage"",
+    },
+    {
+      ""taskId"": 203,
+      ""label"": ""Review client email"",
       ""start"": ""2025-10-26T10:25:00Z"",
       ""end"": ""2025-10-26T10:55:00Z"",
       ""confidence"": 4
-    }},
-    {{
-      ""label"": ""Refine slides"",
-      ""start"": ""2025-10-26T11:00:00Z"",
-      ""end"": ""2025-10-26T12:00:00Z"",
-      ""confidence"": 3,
-      ""nudgeAt"": ""2025-10-26T10:55:00Z""
-    }}
+    }
   ],
-  ""carryOverTaskIds"": [101, 203]
+  ""carryOverTaskIds"": []
 }
 ";
+
+            //            var rulesPrompt = @"
+            //# OUTPUT RULES (STRICT — CRITICAL)
+            //- Output JSON ONLY. No extra text, no markdown, no commentary outside JSON.
+            //- The JSON MUST validate against the provided JSON Schema: `flowos_daily_plan`.
+            //- Every `items[i]` must have: `label` (2–5 words, starts with a verb), `start`, `end`, `confidence` (1–5).
+            //- `start`, `end`, and (optional) `nudgeAt` MUST be ISO 8601 with trailing `Z` (UTC), e.g. `2025-10-26T09:00:00Z`.
+            //- Do NOT schedule outside the provided work window.
+            //- Do NOT overlap time blocks.
+            //- Keep plan achievable (avoid cramming; allow breathing room).
+            //- Tone must be a single value from: `soft`, `strict`, `playful`, `balanced`. You may adjust at most ±1 tone level from the requested hint if it truly benefits the user today. If you adjust, set `tone` to the FINAL tone used.
+            //- `carryOverTaskIds` must contain ONLY task ids that are not scheduled in `items`. Prefer ≤ 3 carries, unless tone=`strict` (then up to 5).
+
+            //# EXAMPLE OUTPUT (illustrative; your actual items depend on input)
+            //{
+            //  ""tone"": ""balanced"",
+            //  ""focus"": ""Make clear progress on key work and keep energy steady"",
+            //  ""items"": [
+            //    {{
+            //      ""label"": ""Draft report intro"",
+            //      ""start"": ""2025-10-26T09:00:00Z"",
+            //      ""end"": ""2025-10-26T10:15:00Z"",
+            //      ""confidence"": 4,
+            //      ""nudgeAt"": ""2025-10-26T08:55:00Z""
+            //    }},
+            //    {{
+            //      ""label"": ""Stretch break"",
+            //      ""start"": ""2025-10-26T10:15:00Z"",
+            //      ""end"": ""2025-10-26T10:25:00Z"",
+            //      ""confidence"": 5
+            //    }},
+            //    {{
+            //      ""label"": ""Review email triage"",
+            //      ""start"": ""2025-10-26T10:25:00Z"",
+            //      ""end"": ""2025-10-26T10:55:00Z"",
+            //      ""confidence"": 4
+            //    }},
+            //    {{
+            //      ""label"": ""Refine slides"",
+            //      ""start"": ""2025-10-26T11:00:00Z"",
+            //      ""end"": ""2025-10-26T12:00:00Z"",
+            //      ""confidence"": 3,
+            //      ""nudgeAt"": ""2025-10-26T10:55:00Z""
+            //    }}
+            //  ],
+            //  ""carryOverTaskIds"": [101, 203]
+            //}
+            //";          
+
             return (systemPrompt.Trim(), userPrompt.Trim(), rulesPrompt.Trim());
         }
 
@@ -673,6 +742,102 @@ Tasks (sorted by priority desc, then due asc):
         private static string GetPlanResponseJsonSchema() => _cachedPlanSchema;
 
         // 2.3) Static builder that returns a JSON string (safe, no manual escaping)
+
+        //private static string BuildPlanSchema()
+        //{
+        //    var schema = new
+        //    {
+        //        type = "object",
+        //        @id = "https://schemas.flowos.app/plan/flowos_daily_plan.json",
+        //        @schema = "https://json-schema.org/draft/2020-12/schema",
+        //        title = "flowos_daily_plan",
+        //        description = "Structured response for FlowOS daily planning",
+        //        additionalProperties = false,
+        //        properties = new
+        //        {
+        //            tone = new
+        //            {
+        //                type = "string",
+        //                // enum is a reserved word, prefix with @ to allow it
+        //                @enum = new[] { "soft", "strict", "playful", "balanced" },
+        //                description = "Final tone applied to the plan."
+        //            },
+        //            focus = new
+        //            {
+        //                type = "string",
+        //                minLength = 3,
+        //                maxLength = 140,
+        //                description = "Single concise sentence describing the day’s main intent."
+        //            },
+        //            items = new
+        //            {
+        //                type = "array",
+        //                items = new
+        //                {
+        //                    type = "object",
+        //                    additionalProperties = false,
+        //                    properties = new
+        //                    {
+        //                        label = new
+        //                        {
+        //                            type = "string",
+        //                            minLength = 2,
+        //                            maxLength = 60,
+        //                            description = "Short (2–5 words) starting with a verb. No emojis/markdown/punctuation."
+        //                        },
+        //                        start = new
+        //                        {
+        //                            type = "string",
+        //                            format = "date-time",
+        //                            pattern = @"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:(?:\d{2}|\d{2}\.\d+)Z$",
+        //                            description = "Start time in ISO-8601 UTC (Z). Example: 2025-10-26T09:00:00Z"
+        //                        },
+        //                        end = new
+        //                        {
+        //                            type = "string",
+        //                            format = "date-time",
+        //                            pattern = @"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:(?:\d{2}|\d{2}\.\d+)Z$",
+        //                            description = "End time in ISO-8601 UTC (Z). Must be > start."
+        //                        },
+        //                        confidence = new
+        //                        {
+        //                            type = "integer",
+        //                            minimum = 1,
+        //                            maximum = 5,
+        //                            description = "AI confidence for this block's placement (1–5)"
+        //                        },
+        //                        nudgeAt = new
+        //                        {
+        //                            type = new[] { "string", "null" },
+        //                            format = "date-time",
+        //                            pattern = @"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:(?:\d{2}|\d{2}\.\d+)Z$",
+        //                            description = "UTC timestamp to send a reminder (usually 5–10 min before start)"
+        //                        }
+        //                    },
+        //                    required = new[] { "label", "start", "end", "confidence", "nudgeAt" }
+        //                }
+        //            },
+        //            carryOverTaskIds = new
+        //            {
+        //                type = "array",
+        //                items = new { type = "integer" },
+        //                description = "IDs of tasks not scheduled today that should roll to the next plan (Smart-Carry)."
+        //            }
+        //        },
+        //        required = new[] { "tone", "focus", "items", "carryOverTaskIds" }
+        //    };
+
+        //    // Serialize once into compact JSON
+        //    var json = JsonSerializer.Serialize(schema, new JsonSerializerOptions { WriteIndented = false });
+
+        //    // Optional: dev-only validation to fail fast if we break schema later
+        //    #if DEBUG
+        //        JsonDocument.Parse(json);
+        //    #endif
+
+        //    return json;
+        //}
+
         private static string BuildPlanSchema()
         {
             var schema = new
@@ -688,7 +853,6 @@ Tasks (sorted by priority desc, then due asc):
                     tone = new
                     {
                         type = "string",
-                        // enum is a reserved word, prefix with @ to allow it
                         @enum = new[] { "soft", "strict", "playful", "balanced" },
                         description = "Final tone applied to the plan."
                     },
@@ -708,12 +872,19 @@ Tasks (sorted by priority desc, then due asc):
                             additionalProperties = false,
                             properties = new
                             {
+                                // ✅ REQUIRED: taskId (real task id OR null for breaks)
+                                taskId = new
+                                {
+                                    type = new[] { "integer", "null" },
+                                    description = "Task ID from input list, or null for breaks / meta blocks."
+                                },
+
                                 label = new
                                 {
                                     type = "string",
                                     minLength = 2,
-                                    maxLength = 60,
-                                    description = "Short (2–5 words) starting with a verb. No emojis/markdown/punctuation."
+                                    maxLength = 120, // allow real task titles
+                                    description = "If taskId != null, must equal task title. If null, short verb phrase."
                                 },
                                 start = new
                                 {
@@ -741,10 +912,12 @@ Tasks (sorted by priority desc, then due asc):
                                     type = new[] { "string", "null" },
                                     format = "date-time",
                                     pattern = @"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:(?:\d{2}|\d{2}\.\d+)Z$",
-                                    description = "UTC timestamp to send a reminder (usually 5–10 min before start)"
+                                    description = "UTC timestamp to send a reminder (usually 5 min before start)"
                                 }
                             },
-                            required = new[] { "label", "start", "end", "confidence", "nudgeAt" }
+
+                            // ✅ taskId is now REQUIRED
+                            required = new[] { "taskId", "label", "start", "end", "confidence", "nudgeAt" }
                         }
                     },
                     carryOverTaskIds = new
@@ -757,12 +930,10 @@ Tasks (sorted by priority desc, then due asc):
                 required = new[] { "tone", "focus", "items", "carryOverTaskIds" }
             };
 
-            // Serialize once into compact JSON
             var json = JsonSerializer.Serialize(schema, new JsonSerializerOptions { WriteIndented = false });
 
-            // Optional: dev-only validation to fail fast if we break schema later
             #if DEBUG
-                JsonDocument.Parse(json);
+            JsonDocument.Parse(json);
             #endif
 
             return json;
