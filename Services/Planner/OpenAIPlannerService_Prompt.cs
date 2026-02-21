@@ -401,15 +401,18 @@ Tasks (sorted by priority desc, then due asc):
 - `nudgeAt` is optional and may be null.
 
 # TASK ID RULES (VERY IMPORTANT)
-- If an item represents a real task from the input list (`id:###; title:...`), you MUST set `taskId` to that exact numeric id.
+- If an item represents a real task from TASK LIST, you MUST set `taskId` to that exact numeric id.
 - If an item is NOT a real task (break / walk / planning / reflection / buffer), you MUST set `taskId` = null.
 - NEVER invent task ids.
 - NEVER omit `taskId`.
 
-# LABEL RULES
+# LABEL RULES (VERY IMPORTANT)
 - If `taskId` != null:
-  - `label` MUST be the EXACT task title from the input (do NOT shorten or rename).
-  - Do NOT use generic labels like ""Complete task 1"" or ""Priority task"".
+  - `label` MUST be EXACTLY the task TITLE from TASK LIST (the text inside quotes).
+  - `label` MUST NOT include the id number.
+  - `label` MUST NOT include priority/est/due/brackets or any metadata.
+  - Example good: ""Pay school fees""
+  - Example bad: ""- 12: Pay school fees [p3, est 30m]""
 - If `taskId` == null:
   - `label` should be 2–5 words and start with a verb (e.g., ""Stretch break"", ""Take a walk"").
 
@@ -444,14 +447,16 @@ Tasks (sorted by priority desc, then due asc):
       ""label"": ""Stretch break"",
       ""start"": ""2025-10-26T10:15:00Z"",
       ""end"": ""2025-10-26T10:25:00Z"",
-      ""confidence"": 5
+      ""confidence"": 5,
+      ""nudgeAt"": null
     },
     {
       ""taskId"": 203,
       ""label"": ""Review client email"",
       ""start"": ""2025-10-26T10:25:00Z"",
       ""end"": ""2025-10-26T10:55:00Z"",
-      ""confidence"": 4
+      ""confidence"": 4,
+      ""nudgeAt"": ""2025-10-26T10:20:00Z""
     }
   ],
   ""carryOverTaskIds"": []
@@ -566,29 +571,62 @@ Tasks (sorted by priority desc, then due asc):
         /// Render tasks as compact single-line bullet items for the user prompt.
         /// Ensures stable formatting and short fields (L2).
         /// </summary>
+
         private static string BuildTaskLines(IEnumerable<TaskAiContext> tasks)
         {
-            if (tasks == null) return "(no pending tasks provided)";
+            if (tasks == null) return "TASK LIST: (empty)";
 
             var ordered = tasks
                 .OrderByDescending(t => t.Priority)
                 .ThenBy(t => t.DueDate)
                 .ToList();
 
-            if (ordered.Count == 0) return "(no pending tasks provided)";
+            if (ordered.Count == 0) return "TASK LIST: (empty)";
 
             var sb = new StringBuilder();
+            sb.AppendLine("TASK LIST (use IDs exactly; do NOT invent IDs):");
+
             foreach (var t in ordered)
             {
-                var desc = (t.Description ?? string.Empty).Trim();
-                if (desc.Length > 140) desc = desc[..140] + "…";
+                // Keep it simple so model won't copy metadata into label
+                // ID and Title are the ONLY things the model should "copy exactly"
+                var title = Sanitize(t.Title ?? "");
+                if (string.IsNullOrWhiteSpace(title)) title = "(untitled task)";
 
-                sb.AppendLine(
-                    $"- id:{t.Id}; title:{Sanitize(t.Title)}; priority:{t.Priority}; estMin:{t.EstimatedMinutes}; due:{t.DueDate:yyyy-MM-dd}; energy:{(t.EnergyLevel ?? "unknown")}; desc:{Sanitize(desc)}"
-                );
+                // Optional: add small non-copy hint in brackets (NOT part of title)
+                var due = t.DueDate.ToString("yyyy-MM-dd");
+                var est = t.EstimatedMinutes;
+                var pr = t.Priority;
+
+                sb.AppendLine($"- {t.Id}: \"{title}\"  [p{pr}, est {est}m, due {due}]");
             }
+
             return sb.ToString().TrimEnd();
         }
+
+        //private static string BuildTaskLines(IEnumerable<TaskAiContext> tasks)
+        //{
+        //    if (tasks == null) return "(no pending tasks provided)";
+
+        //    var ordered = tasks
+        //        .OrderByDescending(t => t.Priority)
+        //        .ThenBy(t => t.DueDate)
+        //        .ToList();
+
+        //    if (ordered.Count == 0) return "(no pending tasks provided)";
+
+        //    var sb = new StringBuilder();
+        //    foreach (var t in ordered)
+        //    {
+        //        var desc = (t.Description ?? string.Empty).Trim();
+        //        if (desc.Length > 140) desc = desc[..140] + "…";
+
+        //        sb.AppendLine(
+        //            $"- id:{t.Id}; title:{Sanitize(t.Title)}; priority:{t.Priority}; estMin:{t.EstimatedMinutes}; due:{t.DueDate:yyyy-MM-dd}; energy:{(t.EnergyLevel ?? "unknown")}; desc:{Sanitize(desc)}"
+        //        );
+        //    }
+        //    return sb.ToString().TrimEnd();
+        //}
 
         /// <summary>
         /// Collapse whitespace/newlines and strip dangerous quotes for prompt safety.

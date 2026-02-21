@@ -539,11 +539,16 @@ namespace FlowOS.Api.Services.Planner
                             var endNudge = end.AddMinutes(-5);
                             if (endNudge <= nowUtc) endNudge = nowUtc.AddSeconds(15);
 
+                            var label = x.TaskId.HasValue
+                            ? (dbTasks.FirstOrDefault(t => t.Id == x.TaskId.Value)?.Title ?? x.Label)
+                            : x.Label;
+
                             return new DailyPlanItem
                             {
                                 PlanId = plan.Id,
                                 TaskId = x.TaskId,
-                                Label = x.Label,
+                                Label = label,
+                                //Label = x.Label,
 
                                 // ✅ store as UTC instants
                                 Start = start,
