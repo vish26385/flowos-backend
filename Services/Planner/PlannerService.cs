@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;       // ← ensure logging namespace
 using System.Diagnostics;
 using System.Text.Json;
 using FlowOS.Api.Helpers;
+using Task = FlowOS.Api.Models.Task;
 
 namespace FlowOS.Api.Services.Planner
 {
@@ -265,13 +266,36 @@ namespace FlowOS.Api.Services.Planner
         //    return MapToDto(savedPlan);
         //}
 
+        static int? TryMapTaskIdByTitle(string label, List<Task> dbTasks)
+        {
+            label = label.Trim().ToLowerInvariant();
+
+            // very simple contains-match
+            var match = dbTasks
+                .Select(t => new { t.Id, Title = (t.Title ?? "").Trim().ToLowerInvariant() })
+                .Where(x => x.Title.Length > 0)
+                .OrderByDescending(x => SimilarityScore(label, x.Title))
+                .FirstOrDefault();
+
+            return match != null && SimilarityScore(label, match.Title) >= 0.6
+                ? match.Id
+                : null;
+        }
+
+        // placeholder scoring: you can start with contains logic
+        static double SimilarityScore(string a, string b)
+        {
+            if (a.Contains(b) || b.Contains(a)) return 1.0;
+            return 0.0;
+        }
+
         public async Task<PlanResponseDto> GeneratePlanAsync(
-    string userId,
-    DateOnly dateKey,                 // ✅ IST calendar date key
-    string? toneOverride = null,
-    bool forceRegenerate = false,
-    DateTime? planStartUtc = null
-)
+            string userId,
+            DateOnly dateKey,                 // ✅ IST calendar date key
+            string? toneOverride = null,
+            bool forceRegenerate = false,
+            DateTime? planStartUtc = null
+        )
         {
             var userOffset = TimeSpan.FromMinutes(330); // IST (+05:30)
 
@@ -352,6 +376,17 @@ namespace FlowOS.Api.Services.Planner
 
             // --- Step 2: Call AI engine ---
             DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
+
+            var validTaskIds = dbTasks.Select(t => t.Id).ToHashSet();
+
+            foreach (var item in aiResult.Timeline)
+            {
+                if (item.TaskId.HasValue && !validTaskIds.Contains(item.TaskId.Value))
+                {
+                    // AI invented / invalid id
+                    item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
+                }
+            }
 
             if (aiResult == null || aiResult.Timeline == null || aiResult.Timeline.Count == 0)
             {
@@ -441,8 +476,8 @@ namespace FlowOS.Api.Services.Planner
                         {
                             i.TaskId,
                             i.Label,
-                            StartUtc = EnsureUtc(i.Start),
-                            EndUtc = EnsureUtc(i.End),
+                            StartUtc = i.Start.UtcDateTime,
+                            EndUtc = i.End.UtcDateTime,
                             i.Confidence
                         })
                         .ToList();
@@ -508,10 +543,15 @@ namespace FlowOS.Api.Services.Planner
                     .FirstAsync(p => p.Id == plan.Id);
             });
 
+            var dayUtc = new DateTimeOffset(
+                dateKey.ToDateTime(TimeOnly.MinValue),  // IST midnight, unspecified
+                TimeSpan.FromMinutes(330)               // IST offset
+            ).UtcDateTime;
+
             // ✅ Tone learning: DateOnly -> DateTime (IST calendar key)
             await ApplyToneLearningAsync(
                 user,
-                dateKey.ToDateTime(TimeOnly.MinValue),
+                dayUtc,
                 aiResult,
                 toneForThisPlanStr
             );

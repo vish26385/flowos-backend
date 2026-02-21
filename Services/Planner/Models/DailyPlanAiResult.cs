@@ -1,4 +1,5 @@
 ﻿using FlowOS.Api.Models;
+using System.Text.Json.Serialization;
 
 namespace FlowOS.Api.Services.Planner.Models
 {   
@@ -56,31 +57,37 @@ namespace FlowOS.Api.Services.Planner.Models
         /// <summary>
         /// Optional mapping to an existing Task. Null when the block is a break or meta-activity.
         /// </summary>
-        public int? TaskId { get; init; }
+        [JsonPropertyName("taskId")]
+        public int? TaskId { get; set; }
 
         /// <summary>
         /// Human-readable label for the block (task title or activity name).
         /// </summary>
+        [JsonPropertyName("label")]
         public required string Label { get; init; }
 
         /// <summary>
         /// Start time (UTC preferred upstream; the PlannerService will ensure UTC as a final step).
         /// </summary>
-        public DateTime Start { get; init; }
+        [JsonPropertyName("start")]
+        public DateTimeOffset Start { get; init; }
 
         /// <summary>
         /// End time (UTC preferred upstream).
         /// </summary>
-        public DateTime End { get; init; }
+        [JsonPropertyName("end")]
+        public DateTimeOffset End { get; init; }
 
         /// <summary>
         /// Confidence score (1–5). Higher = AI is more certain this is a good allocation.
         /// </summary>
+        [JsonPropertyName("confidence")]
         public int Confidence { get; init; } = 3;
 
         /// <summary>
         /// Optional nudge notification time for this block (UTC preferred).
         /// </summary>
+        [JsonPropertyName("nudgeAt")]
         public DateTime? NudgeAt { get; init; }
 
         #endregion
