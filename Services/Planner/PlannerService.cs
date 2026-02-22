@@ -312,6 +312,299 @@ namespace FlowOS.Api.Services.Planner
             return denom == 0 ? 0 : (double)intersect / denom;
         }
 
+        //public async Task<PlanResponseDto> GeneratePlanAsync(
+        //    string userId,
+        //    DateOnly dateKey,                 // ✅ IST calendar date key
+        //    string? toneOverride = null,
+        //    bool forceRegenerate = false,
+        //    DateTime? planStartUtc = null
+        //)
+        //{
+        //    var userOffset = TimeSpan.FromMinutes(330); // IST (+05:30)
+
+        //    // ✅ IST day window -> UTC window (for task filtering)
+        //    var istStartLocal = DateTime.SpecifyKind(
+        //        dateKey.ToDateTime(TimeOnly.MinValue),
+        //        DateTimeKind.Unspecified
+        //    );
+
+        //    var startUtc = new DateTimeOffset(istStartLocal, userOffset).UtcDateTime;
+        //    var endUtc = startUtc.AddDays(1);
+
+        //    // --- Step 0: Load user + reuse existing plan (unless forceRegenerate) ---
+        //    var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        //    if (user == null) throw new Exception("User not found");
+
+        //    var existing = await _context.DailyPlans
+        //        .AsNoTracking()
+        //        .Include(p => p.Items)
+        //        .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == dateKey);
+
+        //    if (existing != null && !forceRegenerate)
+        //        return MapToDto(existing);
+
+        //    // --- Step 1: Build AI request ---
+        //    var workStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
+        //    var workEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
+
+        //    var firstName = (user.FullName ?? "")
+        //        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        //        .FirstOrDefault() ?? "Friend";
+
+        //    var toneForThisPlanEnum = user.PreferredTone ?? user.CurrentTone;
+        //    var toneForThisPlanStr = (toneOverride ?? ToneToAiString(toneForThisPlanEnum))
+        //        .Trim()
+        //        .ToLowerInvariant();
+
+        //    // ✅ Pull candidate tasks for IST day (via UTC window)
+        //    var dbTasks = await _context.Tasks
+        //        .Where(t => t.UserId == userId
+        //            && !t.Completed
+        //            && t.DueDate >= startUtc
+        //            && t.DueDate < endUtc)
+        //        .OrderByDescending(t => t.Priority)
+        //        .ToListAsync();
+
+        //    var taskCtx = dbTasks.Select(t => new TaskAiContext
+        //    {
+        //        Id = t.Id,
+        //        Title = t.Title,
+        //        Description = t.Description,
+        //        Priority = t.Priority,
+        //        DueDate = t.DueDate,
+        //        EstimatedMinutes = t.EstimatedMinutes ?? 30,
+        //        EnergyLevel = t.EnergyLevel
+        //    }).ToList();
+
+        //    var aiRequest = new AiPlanRequest
+        //    {
+        //        UserId = userId,
+        //        User = new UserAiContext
+        //        {
+        //            Id = userId,
+        //            FirstName = firstName,
+        //            FullName = user.FullName,
+        //            WorkStart = workStart,
+        //            WorkEnd = workEnd,
+        //            PreferredTone = user.PreferredTone?.ToString()
+        //        },
+        //        Tasks = taskCtx,
+
+        //        // ✅ For AI context (not DB key): UTC anchor corresponding to IST midnight
+        //        Date = startUtc,
+
+        //        Tone = toneForThisPlanStr,
+        //        ForceRegenerate = forceRegenerate
+        //    };
+
+        //    // --- Step 2: Call AI engine ---
+        //    DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
+        //    _logger.LogInformation("AI Clean JSON: {Json}", aiResult.CleanJson ?? aiResult.RawJson);
+
+        //    var validTaskIds = dbTasks.Select(t => t.Id).ToHashSet();
+
+        //    foreach (var item in aiResult.Timeline)
+        //    {
+        //        // If AI gave an id but it's invalid → try remap by title
+        //        if (item.TaskId.HasValue && !validTaskIds.Contains(item.TaskId.Value))
+        //        {
+        //            item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
+        //        }
+
+        //        // If AI omitted taskId → try map by title
+        //        if (item.TaskId == null)
+        //        {
+        //            item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
+        //        }
+
+        //        _logger.LogInformation("AI item mapped: label='{Label}' taskId={TaskId}",
+        //            item.Label, item.TaskId?.ToString() ?? "null");
+        //    }
+
+        //    if (aiResult == null || aiResult.Timeline == null || aiResult.Timeline.Count == 0)
+        //    {
+        //        aiResult = new DailyPlanAiResult
+        //        {
+        //            Tone = "balanced",
+        //            Focus = "Fallback plan for today.",
+        //            Timeline = new List<AiPlanTimelineItem>
+        //    {
+        //        new AiPlanTimelineItem
+        //        {
+        //            Label = "Manual Planning Required",
+        //            Start = DateTime.UtcNow,
+        //            End = DateTime.UtcNow.AddMinutes(30),
+        //            Confidence = 1
+        //        }
+        //    }
+        //        };
+        //    }
+
+        //    // --- Step 3: Save to DB atomically ---
+        //    var exec = _context.Database.CreateExecutionStrategy();
+        //    DailyPlan savedPlan = null!;
+
+        //    await exec.ExecuteAsync(async () =>
+        //    {
+        //        await using var tx = await _context.Database.BeginTransactionAsync();
+
+        //        var plan = await _context.DailyPlans
+        //            .Include(p => p.Items)
+        //            .FirstOrDefaultAsync(p => p.UserId == userId && p.Date == dateKey);
+
+        //        if (plan == null)
+        //        {
+        //            plan = new DailyPlan
+        //            {
+        //                UserId = userId,
+        //                Date = dateKey
+        //            };
+        //            _context.DailyPlans.Add(plan);
+        //            await _context.SaveChangesAsync();
+        //        }
+        //        else
+        //        {
+        //            // hard delete old items so nudges reset cleanly on regenerate
+        //            if (plan.Items.Any())
+        //            {
+        //                _context.DailyPlanItems.RemoveRange(plan.Items);
+        //                await _context.SaveChangesAsync();
+        //            }
+        //        }
+
+        //        var appliedToneString = string.IsNullOrWhiteSpace(aiResult.Tone)
+        //            ? toneForThisPlanStr
+        //            : aiResult.Tone.Trim().ToLowerInvariant();
+
+        //        plan.Tone = appliedToneString;
+        //        plan.Focus = string.IsNullOrWhiteSpace(aiResult.Focus) ? (plan.Focus ?? "Your plan") : aiResult.Focus;
+        //        plan.GeneratedAt = DateTime.UtcNow;
+        //        plan.PlanJsonRaw = aiResult.RawJson ?? "";
+        //        plan.PlanJsonClean = MinifyJson(aiResult.CleanJson ?? aiResult.RawJson ?? "{}");
+        //        plan.ModelUsed = aiResult.ModelUsed;
+
+        //        await _context.SaveChangesAsync();
+
+        //        if (aiResult.Timeline.Any())
+        //        {
+        //            var nowUtc = DateTime.UtcNow;
+
+        //            var uWorkStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
+        //            var uWorkEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
+
+        //            // ✅ If caller passed planStartUtc, use it EXACTLY (must be UTC)
+        //            var earliest = planStartUtc.HasValue
+        //                ? EnsureUtc(planStartUtc.Value)
+        //                : EarliestStartUtc(
+        //                    nowUtc,
+        //                    uWorkStart,
+        //                    uWorkEnd,
+        //                    bufferMinutes: 10,
+        //                    roundToMinutes: 5
+        //                );
+
+        //            // 1) Normalize AI times to UTC once
+        //            var normalized = aiResult.Timeline
+        //                .Select(i => new
+        //                {
+        //                    i.TaskId,
+        //                    i.Label,
+        //                    StartUtc = i.Start.UtcDateTime,
+        //                    EndUtc = i.End.UtcDateTime,
+        //                    i.Confidence
+        //                })
+        //                .ToList();
+
+        //            var minStartUtc = normalized.Min(x => x.StartUtc);
+        //            var shift = earliest - minStartUtc;
+
+        //            // ✅ Only create items for TaskId != null? (NO)
+        //            // We will store ALL timeline blocks, but send nudges only when TaskId != null in worker.
+        //            // That keeps UI timeline complete.
+        //            var items = normalized
+        //                .OrderBy(x => x.StartUtc)
+        //                .Select(x =>
+        //                {
+        //                    var start = x.StartUtc + shift;
+        //                    var end = x.EndUtc + shift;
+
+        //                    if (end <= start)
+        //                        end = start.AddMinutes(30);
+
+        //                    // ✅ deterministic nudges
+        //                    // If already late (nudge time passed), schedule ASAP so you still get a reminder.
+        //                    DateTime? startNudge = start.AddMinutes(-5);
+        //                    if (startNudge <= nowUtc)
+        //                    {
+        //                        // If task has NOT started yet, send ASAP; otherwise skip.
+        //                        startNudge = (nowUtc < start) ? nowUtc.AddSeconds(10) : null;
+        //                    }
+
+        //                    DateTime? endNudge = end.AddMinutes(-5);
+        //                    if (endNudge <= nowUtc)
+        //                    {
+        //                        // If task has NOT ended yet, send ASAP; otherwise skip.
+        //                        endNudge = (nowUtc < end) ? nowUtc.AddSeconds(15) : null;
+        //                    }
+
+        //                    var label = x.TaskId.HasValue
+        //                    ? (dbTasks.FirstOrDefault(t => t.Id == x.TaskId.Value)?.Title ?? x.Label)
+        //                    : x.Label;
+
+        //                    return new DailyPlanItem
+        //                    {
+        //                        PlanId = plan.Id,
+        //                        TaskId = x.TaskId,
+        //                        Label = label,
+        //                        //Label = x.Label,
+
+        //                        // ✅ store as UTC instants
+        //                        Start = start,
+        //                        End = end,
+
+        //                        Confidence = Math.Clamp(x.Confidence, 1, 5),
+
+        //                        // ✅ start nudge
+        //                        NudgeAt = startNudge,
+        //                        NudgeSentAtUtc = null,
+
+        //                        // ✅ end nudge
+        //                        EndNudgeAtUtc = endNudge,
+        //                        EndNudgeSentAtUtc = null,
+
+        //                        LastNudgeError = null
+        //                    };
+        //                })
+        //                .ToList();
+
+        //            await _context.DailyPlanItems.AddRangeAsync(items);
+        //            await _context.SaveChangesAsync();
+        //        }
+
+        //        await tx.CommitAsync();
+
+        //        savedPlan = await _context.DailyPlans
+        //            .AsNoTracking()
+        //            .Include(p => p.Items)
+        //            .FirstAsync(p => p.Id == plan.Id);
+        //    });
+
+        //    var dayUtc = new DateTimeOffset(
+        //        dateKey.ToDateTime(TimeOnly.MinValue),  // IST midnight, unspecified
+        //        TimeSpan.FromMinutes(330)               // IST offset
+        //    ).UtcDateTime;
+
+        //    // ✅ Tone learning: DateOnly -> DateTime (IST calendar key)
+        //    await ApplyToneLearningAsync(
+        //        user,
+        //        dayUtc,
+        //        aiResult,
+        //        toneForThisPlanStr
+        //    );
+
+        //    return MapToDto(savedPlan);
+        //}
+
         public async Task<PlanResponseDto> GeneratePlanAsync(
             string userId,
             DateOnly dateKey,                 // ✅ IST calendar date key
@@ -365,6 +658,9 @@ namespace FlowOS.Api.Services.Planner
                 .OrderByDescending(t => t.Priority)
                 .ToListAsync();
 
+            // ✅ Fast lookup for user-owned times
+            var taskById = dbTasks.ToDictionary(t => t.Id);
+
             var taskCtx = dbTasks.Select(t => new TaskAiContext
             {
                 Id = t.Id,
@@ -401,26 +697,7 @@ namespace FlowOS.Api.Services.Planner
             DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
             _logger.LogInformation("AI Clean JSON: {Json}", aiResult.CleanJson ?? aiResult.RawJson);
 
-            var validTaskIds = dbTasks.Select(t => t.Id).ToHashSet();
-
-            foreach (var item in aiResult.Timeline)
-            {
-                // If AI gave an id but it's invalid → try remap by title
-                if (item.TaskId.HasValue && !validTaskIds.Contains(item.TaskId.Value))
-                {
-                    item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
-                }
-
-                // If AI omitted taskId → try map by title
-                if (item.TaskId == null)
-                {
-                    item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
-                }
-
-                _logger.LogInformation("AI item mapped: label='{Label}' taskId={TaskId}",
-                    item.Label, item.TaskId?.ToString() ?? "null");
-            }
-
+            // ✅ Hard fallback if AI returns empty
             if (aiResult == null || aiResult.Timeline == null || aiResult.Timeline.Count == 0)
             {
                 aiResult = new DailyPlanAiResult
@@ -431,13 +708,34 @@ namespace FlowOS.Api.Services.Planner
             {
                 new AiPlanTimelineItem
                 {
+                    TaskId = null,
                     Label = "Manual Planning Required",
                     Start = DateTime.UtcNow,
                     End = DateTime.UtcNow.AddMinutes(30),
-                    Confidence = 1
+                    Confidence = 1,
+                    NudgeAt = null
                 }
             }
                 };
+            }
+
+            // ✅ Fix taskId mapping (AI may omit or invent ids)
+            var validTaskIds = taskById.Keys.ToHashSet();
+
+            foreach (var item in aiResult.Timeline)
+            {
+                if (item.TaskId.HasValue && !validTaskIds.Contains(item.TaskId.Value))
+                {
+                    item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
+                }
+
+                if (item.TaskId == null)
+                {
+                    item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
+                }
+
+                _logger.LogInformation("AI item mapped: label='{Label}' taskId={TaskId}",
+                    item.Label, item.TaskId?.ToString() ?? "null");
             }
 
             // --- Step 3: Save to DB atomically ---
@@ -503,64 +801,78 @@ namespace FlowOS.Api.Services.Planner
                             roundToMinutes: 5
                         );
 
-                    // 1) Normalize AI times to UTC once
+                    // ✅ Normalize AI times to UTC (DateTime -> DateTimeKind.Utc)
                     var normalized = aiResult.Timeline
                         .Select(i => new
                         {
-                            i.TaskId,
-                            i.Label,
+                            TaskId = i.TaskId,
+                            Label = i.Label,
                             StartUtc = i.Start.UtcDateTime,
                             EndUtc = i.End.UtcDateTime,
-                            i.Confidence
+                            Confidence = i.Confidence
                         })
                         .ToList();
 
                     var minStartUtc = normalized.Min(x => x.StartUtc);
                     var shift = earliest - minStartUtc;
 
-                    // ✅ Only create items for TaskId != null? (NO)
-                    // We will store ALL timeline blocks, but send nudges only when TaskId != null in worker.
-                    // That keeps UI timeline complete.
                     var items = normalized
                         .OrderBy(x => x.StartUtc)
                         .Select(x =>
                         {
-                            var start = x.StartUtc + shift;
-                            var end = x.EndUtc + shift;
+                            // AI suggested times (draft)
+                            var aiStart = x.StartUtc + shift;
+                            var aiEnd = x.EndUtc + shift;
+                            if (aiEnd <= aiStart) aiEnd = aiStart.AddMinutes(30);
 
-                            if (end <= start)
-                                end = start.AddMinutes(30);
+                            // FINAL times (truth)
+                            var start = aiStart;
+                            var end = aiEnd;
 
-                            // ✅ deterministic nudges
-                            // If already late (nudge time passed), schedule ASAP so you still get a reminder.
-                            var startNudge = start.AddMinutes(-5);
-                            if (startNudge <= nowUtc) startNudge = nowUtc.AddSeconds(10);
+                            // ✅ USER owns time: if task has planned start/end, override AI
+                            if (x.TaskId.HasValue && taskById.TryGetValue(x.TaskId.Value, out var t))
+                            {
+                                if (t.PlannedStartUtc.HasValue && t.PlannedEndUtc.HasValue)
+                                {
+                                    start = EnsureUtc(t.PlannedStartUtc.Value);
+                                    end = EnsureUtc(t.PlannedEndUtc.Value);
 
-                            var endNudge = end.AddMinutes(-5);
-                            if (endNudge <= nowUtc) endNudge = nowUtc.AddSeconds(15);
+                                    if (end <= start)
+                                        end = start.AddMinutes(t.EstimatedMinutes ?? 30);
+                                }
+                            }
 
-                            var label = x.TaskId.HasValue
-                            ? (dbTasks.FirstOrDefault(t => t.Id == x.TaskId.Value)?.Title ?? x.Label)
-                            : x.Label;
+                            // ✅ Clean label: if real task, always use saved task title
+                            var label = x.Label;
+                            if (x.TaskId.HasValue && taskById.TryGetValue(x.TaskId.Value, out var t2))
+                            {
+                                if (!string.IsNullOrWhiteSpace(t2.Title))
+                                    label = t2.Title;
+                            }
+
+                            // ✅ Nudge schedule: send ASAP only if still relevant (no old notifications)
+                            DateTime? startNudge = start.AddMinutes(-5);
+                            if (startNudge <= nowUtc)
+                                startNudge = (nowUtc < start) ? nowUtc.AddSeconds(10) : null;
+
+                            DateTime? endNudge = end.AddMinutes(-5);
+                            if (endNudge <= nowUtc)
+                                endNudge = (nowUtc < end) ? nowUtc.AddSeconds(15) : null;
 
                             return new DailyPlanItem
                             {
                                 PlanId = plan.Id,
                                 TaskId = x.TaskId,
                                 Label = label,
-                                //Label = x.Label,
 
-                                // ✅ store as UTC instants
                                 Start = start,
                                 End = end,
 
                                 Confidence = Math.Clamp(x.Confidence, 1, 5),
 
-                                // ✅ start nudge
                                 NudgeAt = startNudge,
                                 NudgeSentAtUtc = null,
 
-                                // ✅ end nudge
                                 EndNudgeAtUtc = endNudge,
                                 EndNudgeSentAtUtc = null,
 
@@ -581,12 +893,12 @@ namespace FlowOS.Api.Services.Planner
                     .FirstAsync(p => p.Id == plan.Id);
             });
 
+            // ✅ Tone learning dayUtc: DateOnly (IST midnight) -> UTC instant
             var dayUtc = new DateTimeOffset(
-                dateKey.ToDateTime(TimeOnly.MinValue),  // IST midnight, unspecified
-                TimeSpan.FromMinutes(330)               // IST offset
+                dateKey.ToDateTime(TimeOnly.MinValue),
+                TimeSpan.FromMinutes(330)
             ).UtcDateTime;
 
-            // ✅ Tone learning: DateOnly -> DateTime (IST calendar key)
             await ApplyToneLearningAsync(
                 user,
                 dayUtc,

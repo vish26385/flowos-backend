@@ -75,7 +75,7 @@ namespace FlowOS.Api.Services.Notifications
                 .Where(i =>
                     i.Plan != null &&
                     i.TaskId != null && // ✅ ONLY real tasks
-
+                    i.End > nowUtc && // ✅ don't notify for already-ended blocks
                     (
                         (i.NudgeAt != null && i.NudgeAt <= nowUtc && i.NudgeSentAtUtc == null)
                         ||

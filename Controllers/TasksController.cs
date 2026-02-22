@@ -46,18 +46,20 @@ namespace FlowOS.Api.Controllers
             {
                 Title = dto.Title,
                 Description = dto.Description,
-                //DueDate = dto.DueDate,
                 DueDate = dueUtc,
                 Priority = dto.Priority,
                 UserId = userId,
                 Completed = false,
 
-                //// ✅ Default duration saved in DB
-                //EstimatedMinutes = dto.EstimatedMinutes.HasValue && dto.EstimatedMinutes.Value > 0
-                //? dto.EstimatedMinutes.Value
-                //: 30,
+                // ✅ USER planned times (forced UTC)
+                PlannedStartUtc = dto.PlannedStartUtc.HasValue
+                ? EnsureUtc(dto.PlannedStartUtc.Value.UtcDateTime)
+                : null,
 
-                // ✅ STEP 11.2
+                PlannedEndUtc = dto.PlannedEndUtc.HasValue
+                ? EnsureUtc(dto.PlannedEndUtc.Value.UtcDateTime)
+                : null,
+
                 NudgeAtUtc = CalcNudgeAtUtc(dueUtc),
                 NudgeSentAtUtc = null,
                 LastNudgeError = null
@@ -232,6 +234,16 @@ namespace FlowOS.Api.Controllers
             task.Priority = dto.Priority;
             task.Completed = dto.Completed;
 
+            // ✅ Update user-planned times (forced UTC)
+
+            task.PlannedStartUtc = dto.PlannedStartUtc.HasValue
+                ? EnsureUtc(dto.PlannedStartUtc.Value.UtcDateTime)
+                : null;
+
+            task.PlannedEndUtc = dto.PlannedEndUtc.HasValue
+                ? EnsureUtc(dto.PlannedEndUtc.Value.UtcDateTime)
+                : null;
+
             //task.EstimatedMinutes = dto.EstimatedMinutes.HasValue && dto.EstimatedMinutes.Value > 0
             //                        ? dto.EstimatedMinutes.Value
             //                        : (task.EstimatedMinutes ?? 30);
@@ -393,5 +405,10 @@ namespace FlowOS.Api.Controllers
             // OR IST offset (+05:30). Otherwise reject.
             return dtoDueDate.Offset == TimeSpan.Zero || dtoDueDate.Offset == TimeSpan.FromMinutes(330);
         }
+
+        private static DateTime EnsureUtc(DateTime dt)
+    => dt.Kind == DateTimeKind.Utc
+        ? dt
+        : DateTime.SpecifyKind(dt.ToUniversalTime(), DateTimeKind.Utc);
     }
 }

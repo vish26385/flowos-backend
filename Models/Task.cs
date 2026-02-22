@@ -23,5 +23,8 @@
         public DateTime? NudgeAtUtc { get; set; }
         public DateTime? NudgeSentAtUtc { get; set; }
         public string? LastNudgeError { get; set; }
+
+        public DateTime? PlannedStartUtc { get; set; }
+        public DateTime? PlannedEndUtc { get; set; }
     }
 }
