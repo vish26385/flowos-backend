@@ -514,8 +514,8 @@ namespace FlowOS.Api.Services.Planner
                 DateTimeKind.Unspecified
             );
 
-            var startUtc = new DateTimeOffset(istStartLocal, userOffset).UtcDateTime;
-            var endUtc = startUtc.AddDays(1);
+            var dayStartUtc = new DateTimeOffset(istStartLocal, userOffset).UtcDateTime;
+            var dayEndUtc = dayStartUtc.AddDays(1);
 
             // --- Step 0: Load user + reuse existing plan (unless forceRegenerate) ---
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
@@ -543,16 +543,15 @@ namespace FlowOS.Api.Services.Planner
                 .ToLowerInvariant();
 
             // ✅ Pull candidate tasks for IST day (via UTC window)
-            // (When 0 tasks -> we STILL call AI; Tasks list will be empty)
+            // NOTE: still calls AI even if 0 tasks (routine plan)
             var dbTasks = await _context.Tasks
                 .Where(t => t.UserId == userId
                     && !t.Completed
-                    && t.DueDate >= startUtc
-                    && t.DueDate < endUtc)
+                    && t.DueDate >= dayStartUtc
+                    && t.DueDate < dayEndUtc)
                 .OrderByDescending(t => t.Priority)
                 .ToListAsync();
 
-            // ✅ Lookups (safe even if empty)
             var taskById = dbTasks.ToDictionary(t => t.Id);
             var validTaskIds = taskById.Keys.ToHashSet();
 
@@ -567,9 +566,6 @@ namespace FlowOS.Api.Services.Planner
                 EnergyLevel = t.EnergyLevel
             }).ToList();
 
-            // ✅ IMPORTANT:
-            // We keep Date = startUtc (UTC instant for IST midnight) like your original code
-            // and we still call AI even if taskCtx is empty (AI should create a routine plan)
             var aiRequest = new AiPlanRequest
             {
                 UserId = userId,
@@ -584,8 +580,8 @@ namespace FlowOS.Api.Services.Planner
                 },
                 Tasks = taskCtx,
 
-                // ✅ For AI context (not DB key): UTC anchor corresponding to IST midnight
-                Date = startUtc,
+                // ✅ UTC instant corresponding to IST midnight (original behavior)
+                Date = dayStartUtc,
 
                 Tone = toneForThisPlanStr,
                 ForceRegenerate = forceRegenerate
@@ -595,7 +591,7 @@ namespace FlowOS.Api.Services.Planner
             DailyPlanAiResult aiResult = await _aiPlanner.GenerateAiPlanAsync(aiRequest);
             _logger.LogInformation("AI Clean JSON: {Json}", aiResult?.CleanJson ?? aiResult?.RawJson);
 
-            // ✅ Fallback ONLY if AI totally fails (rare)
+            // ✅ Fallback ONLY if AI totally fails
             if (aiResult == null || aiResult.Timeline == null || aiResult.Timeline.Count == 0)
             {
                 aiResult = new DailyPlanAiResult
@@ -618,20 +614,15 @@ namespace FlowOS.Api.Services.Planner
             }
 
             // ✅ Fix taskId mapping ONLY when tasks exist.
-            // If no tasks, all TaskId should remain null (routine entries).
             if (dbTasks.Count > 0)
             {
                 foreach (var item in aiResult.Timeline)
                 {
                     if (item.TaskId.HasValue && !validTaskIds.Contains(item.TaskId.Value))
-                    {
                         item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
-                    }
 
                     if (item.TaskId == null)
-                    {
                         item.TaskId = TryMapTaskIdByTitle(item.Label, dbTasks);
-                    }
 
                     _logger.LogInformation("AI item mapped: label='{Label}' taskId={TaskId}",
                         item.Label, item.TaskId?.ToString() ?? "null");
@@ -639,7 +630,7 @@ namespace FlowOS.Api.Services.Planner
             }
             else
             {
-                // ✅ force routine mode: keep all items as non-task items
+                // routine-only mode
                 foreach (var item in aiResult.Timeline)
                     item.TaskId = null;
             }
@@ -668,7 +659,6 @@ namespace FlowOS.Api.Services.Planner
                 }
                 else
                 {
-                    // hard delete old items so nudges reset cleanly on regenerate
                     if (plan.Items.Any())
                     {
                         _context.DailyPlanItems.RemoveRange(plan.Items);
@@ -692,101 +682,222 @@ namespace FlowOS.Api.Services.Planner
 
                 await _context.SaveChangesAsync();
 
+                // ✅ Build final timeline WITHOUT OVERLAPS:
+                // - Fixed tasks block time
+                // - Flex tasks + routine items are packed into gaps around fixed
                 if (aiResult.Timeline.Any())
                 {
                     var nowUtc = DateTime.UtcNow;
 
-                    var uWorkStart = user.WorkStart ?? new TimeSpan(9, 0, 0);
-                    var uWorkEnd = user.WorkEnd ?? new TimeSpan(18, 0, 0);
+                    // Work window (IST) -> UTC (optional; we mainly prevent overlaps with fixed tasks)
+                    var workStartLocalIst = DateTime.SpecifyKind(dateKey.ToDateTime(TimeOnly.MinValue).Add(workStart), DateTimeKind.Unspecified);
+                    var workEndLocalIst = DateTime.SpecifyKind(dateKey.ToDateTime(TimeOnly.MinValue).Add(workEnd), DateTimeKind.Unspecified);
+                    var workStartUtc = new DateTimeOffset(workStartLocalIst, userOffset).UtcDateTime;
+                    var workEndUtc = new DateTimeOffset(workEndLocalIst, userOffset).UtcDateTime;
+                    if (workEndUtc <= workStartUtc) workEndUtc = workEndUtc.AddDays(1);
 
-                    // ✅ If caller passed planStartUtc, use it EXACTLY (must be UTC)
-                    var earliest = planStartUtc.HasValue
+                    // 1) Fixed blocks
+                    var fixedBlocks = dbTasks
+                        .Where(t => t.PlannedStartUtc.HasValue && t.PlannedEndUtc.HasValue)
+                        .Select(t =>
+                        {
+                            var s = EnsureUtc(t.PlannedStartUtc!.Value);
+                            var e = EnsureUtc(t.PlannedEndUtc!.Value);
+                            if (e <= s) e = s.AddMinutes(t.EstimatedMinutes ?? 30);
+                            return new
+                            {
+                                TaskId = t.Id,
+                                Label = string.IsNullOrWhiteSpace(t.Title) ? "Task" : t.Title!,
+                                Start = s,
+                                End = e,
+                                Confidence = 5
+                            };
+                        })
+                        .OrderBy(x => x.Start)
+                        .ToList();
+
+                    var fixedTaskIds = fixedBlocks.Select(x => x.TaskId).ToHashSet();
+
+                    // 2) Normalize AI timeline, shift to anchor (for flex/routine drafts)
+                    var earliestAnchor = planStartUtc.HasValue
                         ? EnsureUtc(planStartUtc.Value)
                         : EarliestStartUtc(
                             nowUtc,
-                            uWorkStart,
-                            uWorkEnd,
+                            workStart,
+                            workEnd,
                             bufferMinutes: 10,
                             roundToMinutes: 5
                         );
 
-                    // ✅ Normalize AI times to UTC
-                    var normalized = aiResult.Timeline
+                    if (earliestAnchor < nowUtc.AddMinutes(1))
+                        earliestAnchor = nowUtc.AddMinutes(1);
+
+                    // Use AI minStart to compute shift
+                    var normalizedAi = aiResult.Timeline
                         .Select(i => new
                         {
                             TaskId = i.TaskId,
                             Label = i.Label,
                             StartUtc = i.Start.UtcDateTime,
                             EndUtc = i.End.UtcDateTime,
-                            Confidence = i.Confidence
+                            Confidence = Math.Clamp(i.Confidence, 1, 5)
                         })
                         .ToList();
 
-                    var minStartUtc = normalized.Min(x => x.StartUtc);
-                    var shift = earliest - minStartUtc;
+                    var minAiStart = normalizedAi.Min(x => x.StartUtc);
+                    var shift = earliestAnchor - minAiStart;
 
-                    var items = normalized
-                        .OrderBy(x => x.StartUtc)
-                        .Select(x =>
+                    // 3) Build FLEX items list (tasks without planned times + routine items)
+                    //    (we pack these into gaps; no overlaps)
+                    var flexItems = new List<(int? TaskId, string Label, int Confidence, int DurationMin)>();
+
+                    foreach (var x in normalizedAi.OrderBy(x => x.StartUtc))
+                    {
+                        // If it's a fixed task → do not treat as flex (we already have exact block)
+                        if (x.TaskId.HasValue && fixedTaskIds.Contains(x.TaskId.Value))
+                            continue;
+
+                        // Determine label
+                        string label = x.Label;
+                        int durationMin;
+
+                        if (x.TaskId.HasValue && taskById.TryGetValue(x.TaskId.Value, out var t))
                         {
-                            var aiStart = x.StartUtc + shift;
-                            var aiEnd = x.EndUtc + shift;
-                            if (aiEnd <= aiStart) aiEnd = aiStart.AddMinutes(30);
+                            label = string.IsNullOrWhiteSpace(t.Title) ? label : t.Title!;
+                            durationMin = t.EstimatedMinutes ?? 30;
+                        }
+                        else
+                        {
+                            // routine item duration from AI
+                            var dur = (x.EndUtc - x.StartUtc).TotalMinutes;
+                            durationMin = (int)Math.Round(dur <= 0 ? 30 : dur);
+                        }
 
-                            var start = aiStart;
-                            var end = aiEnd;
+                        if (durationMin < 5) durationMin = 5;
 
-                            // ✅ USER owns time: if task has planned start/end, override AI
-                            if (x.TaskId.HasValue && taskById.TryGetValue(x.TaskId.Value, out var t))
-                            {
-                                if (t.PlannedStartUtc.HasValue && t.PlannedEndUtc.HasValue)
-                                {
-                                    start = EnsureUtc(t.PlannedStartUtc.Value);
-                                    end = EnsureUtc(t.PlannedEndUtc.Value);
+                        flexItems.Add((x.TaskId, label, x.Confidence, durationMin));
+                    }
 
-                                    if (end <= start)
-                                        end = start.AddMinutes(t.EstimatedMinutes ?? 30);
-                                }
-                            }
+                    // If user has tasks but AI returned none mapped (edge), ensure tasks exist in flex/fixed:
+                    // (Optional) not required if AI behaves well.
 
-                            // ✅ Clean label: if real task, always use saved task title
-                            var label = x.Label;
-                            if (x.TaskId.HasValue && taskById.TryGetValue(x.TaskId.Value, out var t2))
-                            {
-                                if (!string.IsNullOrWhiteSpace(t2.Title))
-                                    label = t2.Title;
-                            }
+                    // 4) Pack FLEX items into gaps around FIXED blocks
+                    var scheduled = new List<(int? TaskId, string Label, DateTime Start, DateTime End, int Confidence)>();
 
-                            // ✅ Nudge schedule: avoid old nudges
-                            DateTime? startNudge = start.AddMinutes(-5);
-                            if (startNudge <= nowUtc)
-                                startNudge = (nowUtc < start) ? nowUtc.AddSeconds(10) : null;
+                    // add fixed first into schedule (we'll merge while packing)
+                    // packing cursor:
+                    var cursor = earliestAnchor;
 
-                            DateTime? endNudge = end.AddMinutes(-5);
-                            if (endNudge <= nowUtc)
-                                endNudge = (nowUtc < end) ? nowUtc.AddSeconds(15) : null;
+                    // If you want: clamp cursor to workStartUtc when there are NO fixed blocks
+                    // (keeps plans from starting at 3am unless user picked it)
+                    if (fixedBlocks.Count == 0 && cursor < workStartUtc)
+                        cursor = workStartUtc;
 
-                            return new DailyPlanItem
-                            {
-                                PlanId = plan.Id,
-                                TaskId = x.TaskId,
-                                Label = label,
+                    // helper: fill a gap [gapStart, gapEnd)
+                    void FillGap(DateTime gapStart, DateTime gapEnd)
+                    {
+                        if (gapEnd <= gapStart) return;
+                        if (flexItems.Count == 0) return;
 
-                                Start = start,
-                                End = end,
+                        var localCursor = gapStart;
 
-                                Confidence = Math.Clamp(x.Confidence, 1, 5),
+                        while (flexItems.Count > 0)
+                        {
+                            var next = flexItems[0];
+                            var start = localCursor;
+                            var end = start.AddMinutes(next.DurationMin);
 
-                                NudgeAt = startNudge,
-                                NudgeSentAtUtc = null,
+                            if (end > gapEnd)
+                                break; // doesn't fit, stop this gap
 
-                                EndNudgeAtUtc = endNudge,
-                                EndNudgeSentAtUtc = null,
+                            scheduled.Add((next.TaskId, next.Label, start, end, next.Confidence));
+                            flexItems.RemoveAt(0);
+                            localCursor = end;
+                        }
+                    }
 
-                                LastNudgeError = null
-                            };
-                        })
-                        .ToList();
+                    foreach (var fx in fixedBlocks)
+                    {
+                        // pack before fixed
+                        var gapStart = cursor;
+                        var gapEnd = fx.Start;
+
+                        // Don't allow negative/past gaps
+                        if (gapStart < nowUtc.AddMinutes(1)) gapStart = nowUtc.AddMinutes(1);
+
+                        FillGap(gapStart, gapEnd);
+
+                        // add fixed
+                        scheduled.Add((fx.TaskId, fx.Label, fx.Start, fx.End, fx.Confidence));
+
+                        // advance cursor beyond fixed
+                        cursor = fx.End > cursor ? fx.End : cursor;
+                    }
+
+                    // After last fixed: pack remaining flex (first inside work window, then beyond)
+                    // Try inside work window first (optional)
+                    if (cursor < workEndUtc)
+                    {
+                        FillGap(cursor, workEndUtc);
+                        cursor = cursor > workEndUtc ? cursor : workEndUtc;
+                    }
+
+                    // Remaining flex goes after cursor sequentially
+                    while (flexItems.Count > 0)
+                    {
+                        var next = flexItems[0];
+                        var start = cursor;
+                        var end = start.AddMinutes(next.DurationMin);
+
+                        scheduled.Add((next.TaskId, next.Label, start, end, next.Confidence));
+                        flexItems.RemoveAt(0);
+                        cursor = end;
+                    }
+
+                    // If absolutely nothing scheduled, keep fallback
+                    if (scheduled.Count == 0)
+                    {
+                        scheduled.Add((null, "Manual Planning Required", nowUtc, nowUtc.AddMinutes(30), 1));
+                    }
+
+                    // Final sort by start (guaranteed no overlaps from packing)
+                    scheduled = scheduled.OrderBy(x => x.Start).ToList();
+
+                    // 5) Create DailyPlanItems with safe nudge schedule logic
+                    var items = scheduled.Select(x =>
+                    {
+                        var start = EnsureUtc(x.Start);
+                        var end = EnsureUtc(x.End);
+                        if (end <= start) end = start.AddMinutes(30);
+
+                        DateTime? startNudge = start.AddMinutes(-5);
+                        if (startNudge <= nowUtc)
+                            startNudge = (nowUtc < start) ? nowUtc.AddSeconds(10) : null;
+
+                        DateTime? endNudge = end.AddMinutes(-5);
+                        if (endNudge <= nowUtc)
+                            endNudge = (nowUtc < end) ? nowUtc.AddSeconds(15) : null;
+
+                        return new DailyPlanItem
+                        {
+                            PlanId = plan.Id,
+                            TaskId = x.TaskId,
+                            Label = x.Label,
+
+                            Start = start,
+                            End = end,
+
+                            Confidence = Math.Clamp(x.Confidence, 1, 5),
+
+                            NudgeAt = startNudge,
+                            NudgeSentAtUtc = null,
+
+                            EndNudgeAtUtc = endNudge,
+                            EndNudgeSentAtUtc = null,
+
+                            LastNudgeError = null
+                        };
+                    }).ToList();
 
                     await _context.DailyPlanItems.AddRangeAsync(items);
                     await _context.SaveChangesAsync();
