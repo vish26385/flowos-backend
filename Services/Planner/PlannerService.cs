@@ -543,7 +543,6 @@ namespace FlowOS.Api.Services.Planner
                 .ToLowerInvariant();
 
             // ✅ Pull candidate tasks for IST day (via UTC window)
-            // NOTE: still calls AI even if 0 tasks (routine plan)
             var dbTasks = await _context.Tasks
                 .Where(t => t.UserId == userId
                     && !t.Completed
@@ -579,10 +578,7 @@ namespace FlowOS.Api.Services.Planner
                     PreferredTone = user.PreferredTone?.ToString()
                 },
                 Tasks = taskCtx,
-
-                // ✅ UTC instant corresponding to IST midnight (original behavior)
-                Date = dayStartUtc,
-
+                Date = dayStartUtc, // ✅ UTC instant corresponding to IST midnight
                 Tone = toneForThisPlanStr,
                 ForceRegenerate = forceRegenerate
             };
@@ -682,19 +678,20 @@ namespace FlowOS.Api.Services.Planner
 
                 await _context.SaveChangesAsync();
 
-                // ✅ Build final timeline WITHOUT OVERLAPS:
-                // - Fixed tasks block time
-                // - Flex tasks + routine items are packed into gaps around fixed
                 if (aiResult.Timeline.Any())
                 {
                     var nowUtc = DateTime.UtcNow;
 
-                    // Work window (IST) -> UTC (optional; we mainly prevent overlaps with fixed tasks)
+                    // Work window (IST) -> UTC
                     var workStartLocalIst = DateTime.SpecifyKind(dateKey.ToDateTime(TimeOnly.MinValue).Add(workStart), DateTimeKind.Unspecified);
                     var workEndLocalIst = DateTime.SpecifyKind(dateKey.ToDateTime(TimeOnly.MinValue).Add(workEnd), DateTimeKind.Unspecified);
                     var workStartUtc = new DateTimeOffset(workStartLocalIst, userOffset).UtcDateTime;
                     var workEndUtc = new DateTimeOffset(workEndLocalIst, userOffset).UtcDateTime;
                     if (workEndUtc <= workStartUtc) workEndUtc = workEndUtc.AddDays(1);
+
+                    static int RoundDownTo5(int minutes) => (minutes / 5) * 5;
+
+                    const int MinUserFlexMinutes = 20; // ✅ your requirement
 
                     // 1) Fixed blocks
                     var fixedBlocks = dbTasks
@@ -718,7 +715,7 @@ namespace FlowOS.Api.Services.Planner
 
                     var fixedTaskIds = fixedBlocks.Select(x => x.TaskId).ToHashSet();
 
-                    // 2) Normalize AI timeline, shift to anchor (for flex/routine drafts)
+                    // 2) Anchor for shifting
                     var earliestAnchor = planStartUtc.HasValue
                         ? EnsureUtc(planStartUtc.Value)
                         : EarliestStartUtc(
@@ -732,7 +729,7 @@ namespace FlowOS.Api.Services.Planner
                     if (earliestAnchor < nowUtc.AddMinutes(1))
                         earliestAnchor = nowUtc.AddMinutes(1);
 
-                    // Use AI minStart to compute shift
+                    // Normalize AI timeline and compute shift
                     var normalizedAi = aiResult.Timeline
                         .Select(i => new
                         {
@@ -747,53 +744,48 @@ namespace FlowOS.Api.Services.Planner
                     var minAiStart = normalizedAi.Min(x => x.StartUtc);
                     var shift = earliestAnchor - minAiStart;
 
-                    // 3) Build FLEX items list (tasks without planned times + routine items)
-                    //    (we pack these into gaps; no overlaps)
-                    var flexItems = new List<(int? TaskId, string Label, int Confidence, int DurationMin)>();
+                    // 3) Build FLEX items list (user-flex tasks + routine items)
+                    var flexItems = new List<(int? TaskId, string Label, int Confidence, int PreferredMin, bool IsUserFlexTask)>();
 
                     foreach (var x in normalizedAi.OrderBy(x => x.StartUtc))
                     {
-                        // If it's a fixed task → do not treat as flex (we already have exact block)
+                        // ignore fixed tasks from AI draft
                         if (x.TaskId.HasValue && fixedTaskIds.Contains(x.TaskId.Value))
                             continue;
 
-                        // Determine label
                         string label = x.Label;
-                        int durationMin;
+                        int preferredMin;
+                        bool isUserFlex = false;
 
                         if (x.TaskId.HasValue && taskById.TryGetValue(x.TaskId.Value, out var t))
                         {
+                            // this is a USER task (flex if not fixed)
                             label = string.IsNullOrWhiteSpace(t.Title) ? label : t.Title!;
-                            durationMin = t.EstimatedMinutes ?? 30;
+                            isUserFlex = !(t.PlannedStartUtc.HasValue && t.PlannedEndUtc.HasValue);
+
+                            preferredMin = t.EstimatedMinutes ?? 9999; // still used as preference, but we will shrink to fit gap
                         }
                         else
                         {
                             // routine item duration from AI
                             var dur = (x.EndUtc - x.StartUtc).TotalMinutes;
-                            durationMin = (int)Math.Round(dur <= 0 ? 30 : dur);
+                            preferredMin = (int)Math.Round(dur <= 0 ? 30 : dur);
                         }
 
-                        if (durationMin < 5) durationMin = 5;
+                        if (preferredMin < 5) preferredMin = 5;
 
-                        flexItems.Add((x.TaskId, label, x.Confidence, durationMin));
+                        flexItems.Add((x.TaskId, label, x.Confidence, preferredMin, isUserFlex));
                     }
 
-                    // If user has tasks but AI returned none mapped (edge), ensure tasks exist in flex/fixed:
-                    // (Optional) not required if AI behaves well.
-
-                    // 4) Pack FLEX items into gaps around FIXED blocks
+                    // 4) Pack FLEX items into gaps around FIXED blocks (NO OVERLAPS)
                     var scheduled = new List<(int? TaskId, string Label, DateTime Start, DateTime End, int Confidence)>();
 
-                    // add fixed first into schedule (we'll merge while packing)
-                    // packing cursor:
                     var cursor = earliestAnchor;
 
-                    // If you want: clamp cursor to workStartUtc when there are NO fixed blocks
-                    // (keeps plans from starting at 3am unless user picked it)
                     if (fixedBlocks.Count == 0 && cursor < workStartUtc)
                         cursor = workStartUtc;
 
-                    // helper: fill a gap [gapStart, gapEnd)
+                    // ✅ UPDATED: FillGap will SHRINK user-flex to the gap (min 20), NO SPLIT
                     void FillGap(DateTime gapStart, DateTime gapEnd)
                     {
                         if (gapEnd <= gapStart) return;
@@ -803,64 +795,110 @@ namespace FlowOS.Api.Services.Planner
 
                         while (flexItems.Count > 0)
                         {
-                            var next = flexItems[0];
-                            var start = localCursor;
-                            var end = start.AddMinutes(next.DurationMin);
+                            var gapMin = (int)Math.Floor((gapEnd - localCursor).TotalMinutes);
+                            gapMin = RoundDownTo5(gapMin);
 
-                            if (end > gapEnd)
-                                break; // doesn't fit, stop this gap
+                            if (gapMin < 5) return;
+
+                            // Choose what to place:
+                            // - If gap >= 20, try first USER-FLEX that can be shrunk to >=20
+                            // - Otherwise try routine items that fit
+                            int idx = -1;
+
+                            if (gapMin >= MinUserFlexMinutes)
+                            {
+                                idx = flexItems.FindIndex(it =>
+                                    it.IsUserFlexTask &&
+                                    Math.Min(it.PreferredMin, gapMin) >= MinUserFlexMinutes
+                                );
+
+                                // if no user-flex found, try any routine item that fits
+                                if (idx < 0)
+                                {
+                                    idx = flexItems.FindIndex(it =>
+                                        !it.IsUserFlexTask && it.PreferredMin <= gapMin
+                                    );
+                                }
+                            }
+                            else
+                            {
+                                // gap < 20 → do NOT place user-flex; only routine items
+                                idx = flexItems.FindIndex(it =>
+                                    !it.IsUserFlexTask && it.PreferredMin <= gapMin
+                                );
+                            }
+
+                            if (idx < 0) return; // nothing fits this gap
+
+                            var next = flexItems[idx];
+
+                            int durMin;
+                            if (next.IsUserFlexTask)
+                            {
+                                // ✅ shrink-to-fit, min 20
+                                durMin = Math.Min(next.PreferredMin, gapMin);
+                                durMin = RoundDownTo5(durMin);
+                                if (durMin < MinUserFlexMinutes) return; // safety (shouldn't happen due to selection)
+                            }
+                            else
+                            {
+                                // routine item must fully fit; keep as-is (or can shrink, but not needed)
+                                durMin = Math.Min(next.PreferredMin, gapMin);
+                                durMin = RoundDownTo5(durMin);
+                                if (durMin < 5) return;
+                            }
+
+                            var start = localCursor;
+                            var end = start.AddMinutes(durMin);
 
                             scheduled.Add((next.TaskId, next.Label, start, end, next.Confidence));
-                            flexItems.RemoveAt(0);
+                            flexItems.RemoveAt(idx);
                             localCursor = end;
                         }
                     }
 
                     foreach (var fx in fixedBlocks)
                     {
-                        // pack before fixed
                         var gapStart = cursor;
                         var gapEnd = fx.Start;
 
-                        // Don't allow negative/past gaps
                         if (gapStart < nowUtc.AddMinutes(1)) gapStart = nowUtc.AddMinutes(1);
 
                         FillGap(gapStart, gapEnd);
 
-                        // add fixed
                         scheduled.Add((fx.TaskId, fx.Label, fx.Start, fx.End, fx.Confidence));
-
-                        // advance cursor beyond fixed
                         cursor = fx.End > cursor ? fx.End : cursor;
                     }
 
-                    // After last fixed: pack remaining flex (first inside work window, then beyond)
-                    // Try inside work window first (optional)
                     if (cursor < workEndUtc)
                     {
                         FillGap(cursor, workEndUtc);
                         cursor = cursor > workEndUtc ? cursor : workEndUtc;
                     }
 
-                    // Remaining flex goes after cursor sequentially
+                    // Remaining flex goes after cursor sequentially (NO SHRINK needed here)
                     while (flexItems.Count > 0)
                     {
                         var next = flexItems[0];
+                        var dur = Math.Max(5, RoundDownTo5(next.PreferredMin));
+
+                        // If it's a user-flex task, enforce at least 20 minutes when scheduling normally
+                        if (next.IsUserFlexTask && dur < MinUserFlexMinutes)
+                            dur = MinUserFlexMinutes;
+
                         var start = cursor;
-                        var end = start.AddMinutes(next.DurationMin);
+                        var end = start.AddMinutes(dur);
 
                         scheduled.Add((next.TaskId, next.Label, start, end, next.Confidence));
                         flexItems.RemoveAt(0);
                         cursor = end;
                     }
 
-                    // If absolutely nothing scheduled, keep fallback
                     if (scheduled.Count == 0)
                     {
                         scheduled.Add((null, "Manual Planning Required", nowUtc, nowUtc.AddMinutes(30), 1));
                     }
 
-                    // Final sort by start (guaranteed no overlaps from packing)
                     scheduled = scheduled.OrderBy(x => x.Start).ToList();
 
                     // 5) Create DailyPlanItems with safe nudge schedule logic
