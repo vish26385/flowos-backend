@@ -292,14 +292,12 @@ namespace FlowOS.Api.Controllers
 
         //    var userOffset = TimeSpan.FromMinutes(330); // IST
 
-        //    // ✅ Convert task UTC dueDate → IST calendar day
-        //    var istDate = new DateTimeOffset(task.DueDate, TimeSpan.Zero)
-        //        .ToOffset(userOffset)
-        //        .Date;
-
-        //    // ✅ Convert IST midnight → UTC instant (your plan.Date key)
-        //    var istMidnightLocal = DateTime.SpecifyKind(istDate, DateTimeKind.Unspecified);
-        //    var planDateUtc = new DateTimeOffset(istMidnightLocal, userOffset).UtcDateTime;
+        //    // ✅ Convert task UTC dueDate → IST calendar DateOnly
+        //    var istDay = DateOnly.FromDateTime(
+        //        new DateTimeOffset(task.DueDate, TimeSpan.Zero)
+        //            .ToOffset(userOffset)
+        //            .DateTime
+        //    );
 
         //    await using var tx = await _context.Database.BeginTransactionAsync();
 
@@ -307,12 +305,12 @@ namespace FlowOS.Api.Controllers
         //    _context.Tasks.Remove(task);
         //    await _context.SaveChangesAsync();
 
-        //    // 2️⃣ Delete plan using IST-derived key
+        //    // 2️⃣ Delete DailyPlan by IST DateOnly key
         //    var plan = await _context.DailyPlans
         //        .Include(p => p.Items)
         //        .FirstOrDefaultAsync(p =>
         //            p.UserId == userId &&
-        //            p.Date == planDateUtc);
+        //            p.Date == istDay);
 
         //    if (plan != null)
         //    {
@@ -326,7 +324,7 @@ namespace FlowOS.Api.Controllers
         //}
 
         // DELETE: api/tasks/{id}
-        [HttpDelete("{id}")]
+        [HttpDelete("{id:int}")]
         public async Task<IActionResult> DeleteTask(int id)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
@@ -335,43 +333,61 @@ namespace FlowOS.Api.Controllers
             if (string.IsNullOrEmpty(userId))
                 return Unauthorized();
 
-            var task = await _context.Tasks
-                .FirstOrDefaultAsync(t => t.Id == id && t.UserId == userId);
-
-            if (task == null)
-                return NotFound();
-
             var userOffset = TimeSpan.FromMinutes(330); // IST
 
-            // ✅ Convert task UTC dueDate → IST calendar DateOnly
-            var istDay = DateOnly.FromDateTime(
-                new DateTimeOffset(task.DueDate, TimeSpan.Zero)
-                    .ToOffset(userOffset)
-                    .DateTime
-            );
+            // Use execution strategy (important for transient failures / retries)
+            var exec = _context.Database.CreateExecutionStrategy();
 
-            await using var tx = await _context.Database.BeginTransactionAsync();
-
-            // 1️⃣ Delete task
-            _context.Tasks.Remove(task);
-            await _context.SaveChangesAsync();
-
-            // 2️⃣ Delete DailyPlan by IST DateOnly key
-            var plan = await _context.DailyPlans
-                .Include(p => p.Items)
-                .FirstOrDefaultAsync(p =>
-                    p.UserId == userId &&
-                    p.Date == istDay);
-
-            if (plan != null)
+            return await exec.ExecuteAsync(async () =>
             {
-                _context.DailyPlans.Remove(plan);
-                await _context.SaveChangesAsync();
-            }
+                await using var tx = await _context.Database.BeginTransactionAsync();
 
-            await tx.CommitAsync();
+                // 1) Read minimal info (DueDate) to compute IST day
+                var taskInfo = await _context.Tasks
+                    .Where(t => t.Id == id && t.UserId == userId)
+                    .Select(t => new { t.Id, t.DueDate })
+                    .FirstOrDefaultAsync();
 
-            return NoContent();
+                // If already deleted (or never existed), treat as success (idempotent delete)
+                if (taskInfo == null)
+                {
+                    await tx.CommitAsync();
+                    return NoContent();
+                }
+
+                var istDay = DateOnly.FromDateTime(
+                    new DateTimeOffset(taskInfo.DueDate, TimeSpan.Zero)
+                        .ToOffset(userOffset)
+                        .DateTime
+                );
+
+                // 2) Delete the Task using set-based delete (no concurrency exception)
+                await _context.Tasks
+                    .Where(t => t.Id == id && t.UserId == userId)
+                    .ExecuteDeleteAsync();
+
+                // 3) Find today's plan for that IST day
+                var planId = await _context.DailyPlans
+                    .Where(p => p.UserId == userId && p.Date == istDay)
+                    .Select(p => (int?)p.Id)
+                    .FirstOrDefaultAsync();
+
+                if (planId.HasValue)
+                {
+                    // 4) Delete items first (reduces locking issues)
+                    await _context.DailyPlanItems
+                        .Where(i => i.PlanId == planId.Value)
+                        .ExecuteDeleteAsync();
+
+                    // 5) Delete plan
+                    await _context.DailyPlans
+                        .Where(p => p.Id == planId.Value)
+                        .ExecuteDeleteAsync();
+                }
+
+                await tx.CommitAsync();
+                return NoContent();
+            });
         }
 
         private static DateTime? CalcNudgeAtUtc(DateTime dueUtc, int leadMinutes = 10)
