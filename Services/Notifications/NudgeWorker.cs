@@ -242,6 +242,18 @@ namespace FlowOS.Api.Services.Notifications
         private readonly ILogger<NudgeWorker> _logger;
         private readonly IOptions<ExpoPushOptions> _opt;
 
+        // Strong types (NO dynamic)
+        private sealed record DueNudge(
+            int ItemId,
+            string UserId,
+            int TaskId,
+            string Label,
+            bool StartPending,
+            bool EndPending
+        );
+
+        private sealed record TokenRow(string UserId, string ExpoPushToken);
+
         public NudgeWorker(
             IServiceScopeFactory scopeFactory,
             ILogger<NudgeWorker> logger,
@@ -294,7 +306,6 @@ namespace FlowOS.Api.Services.Notifications
             var limit = 200;
 
             // ✅ Pull due nudges (projection only). No tracked entities. No Include().
-            // Join to DailyPlans to get UserId.
             var due = await SafeDbQuery(async () =>
             {
                 return await (
@@ -307,40 +318,38 @@ namespace FlowOS.Api.Services.Notifications
                              || (i.EndNudgeAtUtc != null && i.EndNudgeAtUtc <= nowUtc && i.EndNudgeSentAtUtc == null)
                              )
                     orderby (i.NudgeAt ?? i.EndNudgeAtUtc)
-                    select new
-                    {
-                        ItemId = i.Id,
+                    select new DueNudge(
+                        i.Id,
                         p.UserId,
-                        TaskId = i.TaskId!.Value,
+                        i.TaskId!.Value,
                         i.Label,
-
-                        StartPending = i.NudgeAt != null && i.NudgeAt <= nowUtc && i.NudgeSentAtUtc == null,
-                        EndPending = i.EndNudgeAtUtc != null && i.EndNudgeAtUtc <= nowUtc && i.EndNudgeSentAtUtc == null
-                    }
+                        i.NudgeAt != null && i.NudgeAt <= nowUtc && i.NudgeSentAtUtc == null,
+                        i.EndNudgeAtUtc != null && i.EndNudgeAtUtc <= nowUtc && i.EndNudgeSentAtUtc == null
+                    )
                 )
                 .Take(limit)
                 .ToListAsync(ct);
-            }, fallback: new List<dynamic>());
+            }, fallback: new List<DueNudge>());
 
             if (due.Count == 0) return;
 
             _logger.LogInformation("🔔 NudgeWorker found {Count} due plan nudges.", due.Count);
 
-            // Load device tokens for all users involved (read-only)
-            var userIds = due.Select(x => (string)x.UserId).Distinct().ToList();
+            // ✅ Load device tokens for all users involved (read-only)
+            var userIds = due.Select(x => x.UserId).Distinct().ToList();
 
             var tokens = await SafeDbQuery(async () =>
             {
                 return await db.UserDeviceTokens
                     .AsNoTracking()
                     .Where(x => x.IsActive && userIds.Contains(x.UserId))
-                    .Select(x => new { x.UserId, x.ExpoPushToken })
+                    .Select(x => new TokenRow(x.UserId, x.ExpoPushToken))
                     .ToListAsync(ct);
-            }, fallback: new List<dynamic>());
+            }, fallback: new List<TokenRow>());
 
             var tokensByUser = tokens
-                .GroupBy(t => (string)t.UserId)
-                .ToDictionary(g => g.Key, g => g.Select(x => (string)x.ExpoPushToken).Distinct().ToList());
+                .GroupBy(t => t.UserId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.ExpoPushToken).Distinct().ToList());
 
             var options = _opt.Value ?? new ExpoPushOptions();
             var batchSize = Math.Max(1, options.BatchSize);
@@ -349,26 +358,24 @@ namespace FlowOS.Api.Services.Notifications
             {
                 ct.ThrowIfCancellationRequested();
 
-                var userId = (string)d.UserId;
-                var itemId = (int)d.ItemId;
-                var taskId = (int)d.TaskId;
-                var label = (string)d.Label;
-
-                if (!tokensByUser.TryGetValue(userId, out var userTokens) || userTokens.Count == 0)
+                if (!tokensByUser.TryGetValue(d.UserId, out var userTokens) || userTokens.Count == 0)
                 {
                     // best-effort write; if item is deleted, ignore
-                    await SafeExecuteUpdate(db, () => SafeSetLastError(db, itemId, "No active device tokens for user.", ct), _logger);
+                    await SafeExecuteUpdate(
+                        () => SafeSetLastError(db, d.ItemId, "No active device tokens for user.", ct));
                     continue;
                 }
 
-                // ✅ START nudge path (claim first, then send)
-                if ((bool)d.StartPending)
+                // ✅ START nudge (claim first, then send)
+                if (d.StartPending)
                 {
-                    var claimed = await SafeExecuteUpdate(db, () => ClaimStartNudge(db, itemId, nowUtc, ct), _logger);
+                    var claimed = await SafeExecuteUpdateBool(
+                        () => ClaimStartNudge(db, d.ItemId, nowUtc, ct));
+
                     if (claimed)
                     {
                         var title = "⏰ Task starting soon";
-                        var body = $"{label} starts in 5 minutes.";
+                        var body = $"{d.Label} starts in 5 minutes.";
 
                         var messages = userTokens.Select(tok => new ExpoPushMessage
                         {
@@ -377,8 +384,8 @@ namespace FlowOS.Api.Services.Notifications
                             Body = body,
                             Data = new Dictionary<string, object>
                             {
-                                ["planItemId"] = itemId,
-                                ["taskId"] = taskId,
+                                ["planItemId"] = d.ItemId,
+                                ["taskId"] = d.TaskId,
                                 ["type"] = "plan_start_nudge"
                             }
                         });
@@ -387,24 +394,25 @@ namespace FlowOS.Api.Services.Notifications
 
                         if (anyOk)
                         {
-                            await SafeExecuteUpdate(db, () => ClearLastError(db, itemId, ct), _logger);
+                            await SafeExecuteUpdate(() => ClearLastError(db, d.ItemId, ct));
                         }
                         else
                         {
-                            // revert claim so it can retry later (if row exists)
-                            await SafeExecuteUpdate(db, () => RevertStartClaim(db, itemId, lastError ?? "Unknown Expo error", ct), _logger);
+                            await SafeExecuteUpdate(() => RevertStartClaim(db, d.ItemId, lastError ?? "Unknown Expo error", ct));
                         }
                     }
                 }
 
-                // ✅ END nudge path (claim first, then send)
-                if ((bool)d.EndPending)
+                // ✅ END nudge (claim first, then send)
+                if (d.EndPending)
                 {
-                    var claimed = await SafeExecuteUpdate(db, () => ClaimEndNudge(db, itemId, nowUtc, ct), _logger);
+                    var claimed = await SafeExecuteUpdateBool(
+                        () => ClaimEndNudge(db, d.ItemId, nowUtc, ct));
+
                     if (claimed)
                     {
                         var title = "✅ Task ending soon";
-                        var body = $"{label} ends in 5 minutes.";
+                        var body = $"{d.Label} ends in 5 minutes.";
 
                         var messages = userTokens.Select(tok => new ExpoPushMessage
                         {
@@ -413,8 +421,8 @@ namespace FlowOS.Api.Services.Notifications
                             Body = body,
                             Data = new Dictionary<string, object>
                             {
-                                ["planItemId"] = itemId,
-                                ["taskId"] = taskId,
+                                ["planItemId"] = d.ItemId,
+                                ["taskId"] = d.TaskId,
                                 ["type"] = "plan_end_nudge"
                             }
                         });
@@ -423,11 +431,11 @@ namespace FlowOS.Api.Services.Notifications
 
                         if (anyOk)
                         {
-                            await SafeExecuteUpdate(db, () => ClearLastError(db, itemId, ct), _logger);
+                            await SafeExecuteUpdate(() => ClearLastError(db, d.ItemId, ct));
                         }
                         else
                         {
-                            await SafeExecuteUpdate(db, () => RevertEndClaim(db, itemId, lastError ?? "Unknown Expo error", ct), _logger);
+                            await SafeExecuteUpdate(() => RevertEndClaim(db, d.ItemId, lastError ?? "Unknown Expo error", ct));
                         }
                     }
                 }
@@ -436,7 +444,6 @@ namespace FlowOS.Api.Services.Notifications
 
         // ----------------- DB SAFETY WRAPPERS -----------------
 
-        // For read-only queries: if deadlock/serialization occurs, we just skip this tick safely.
         private async Task<T> SafeDbQuery<T>(Func<Task<T>> action, T fallback)
         {
             try
@@ -455,39 +462,7 @@ namespace FlowOS.Api.Services.Notifications
             }
         }
 
-        // For update/claim operations: return false when we can’t safely update.
-        private static async Task<bool> SafeExecuteUpdate(
-            FlowOSContext db,
-            Func<Task<bool>> updateAction,
-            ILogger logger)
-        {
-            try
-            {
-                return await updateAction();
-            }
-            catch (PostgresException ex) when (ex.SqlState == "40P01" || ex.SqlState == "40001")
-            {
-                // deadlock_detected / serialization_failure => just retry next tick
-                logger.LogWarning(ex, "⚠️ DB transient error (deadlock/serialization) during update. Will retry next tick.");
-                return false;
-            }
-            catch (DbUpdateConcurrencyException ex)
-            {
-                // row likely deleted between read and update
-                logger.LogWarning(ex, "⚠️ Concurrency during update (row may be deleted). Ignoring.");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "⚠️ Update failed. Ignoring for this tick.");
-                return false;
-            }
-        }
-
-        private static async Task SafeExecuteUpdate(
-            FlowOSContext db,
-            Func<Task> updateAction,
-            ILogger logger)
+        private async Task SafeExecuteUpdate(Func<Task> updateAction)
         {
             try
             {
@@ -495,15 +470,38 @@ namespace FlowOS.Api.Services.Notifications
             }
             catch (PostgresException ex) when (ex.SqlState == "40P01" || ex.SqlState == "40001")
             {
-                logger.LogWarning(ex, "⚠️ DB transient error (deadlock/serialization) during update. Will retry next tick.");
+                _logger.LogWarning(ex, "⚠️ DB transient error (deadlock/serialization) during update. Will retry next tick.");
             }
             catch (DbUpdateConcurrencyException ex)
             {
-                logger.LogWarning(ex, "⚠️ Concurrency during update (row may be deleted). Ignoring.");
+                _logger.LogWarning(ex, "⚠️ Concurrency during update (row may be deleted). Ignoring.");
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "⚠️ Update failed. Ignoring for this tick.");
+                _logger.LogWarning(ex, "⚠️ Update failed. Ignoring for this tick.");
+            }
+        }
+
+        private async Task<bool> SafeExecuteUpdateBool(Func<Task<bool>> updateAction)
+        {
+            try
+            {
+                return await updateAction();
+            }
+            catch (PostgresException ex) when (ex.SqlState == "40P01" || ex.SqlState == "40001")
+            {
+                _logger.LogWarning(ex, "⚠️ DB transient error (deadlock/serialization) during update. Will retry next tick.");
+                return false;
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                _logger.LogWarning(ex, "⚠️ Concurrency during update (row may be deleted). Ignoring.");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "⚠️ Update failed. Ignoring for this tick.");
+                return false;
             }
         }
 
@@ -523,7 +521,6 @@ namespace FlowOS.Api.Services.Notifications
                     .SetProperty(i => i.LastNudgeError, (string?)null),
                     ct);
 
-            // rows==0 means already sent OR row deleted OR no longer eligible
             return rows == 1;
         }
 
@@ -546,7 +543,6 @@ namespace FlowOS.Api.Services.Notifications
 
         private static async Task RevertStartClaim(FlowOSContext db, int itemId, string error, CancellationToken ct)
         {
-            // Only revert if still claimed (prevents wiping a real sent flag)
             await db.DailyPlanItems
                 .Where(i => i.Id == itemId && i.NudgeSentAtUtc != null)
                 .ExecuteUpdateAsync(setters => setters
@@ -596,7 +592,9 @@ namespace FlowOS.Api.Services.Notifications
 
             foreach (var batch in messages.Chunk(batchSize))
             {
-                var (ok, error) = await push.SendAsync(batch, ct);
+                // ✅ Explicit tuple types to avoid CS8130 inference errors
+                (bool ok, string? error) = await push.SendAsync(batch, ct);
+
                 if (ok) anyOk = true;
                 if (!ok) lastError = error;
             }
