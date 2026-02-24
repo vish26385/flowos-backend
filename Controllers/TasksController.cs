@@ -323,71 +323,74 @@ namespace FlowOS.Api.Controllers
         //    return NoContent();
         //}
 
-        // DELETE: api/tasks/{id}
         [HttpDelete("{id:int}")]
-        public async Task<IActionResult> DeleteTask(int id)
+        public async Task<IActionResult> DeleteTask(int id, CancellationToken ct)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
-                         ?? User.FindFirst("id")?.Value;
+            var userId =
+                User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirst("id")?.Value;
 
-            if (string.IsNullOrEmpty(userId))
+            if (string.IsNullOrWhiteSpace(userId))
                 return Unauthorized();
 
             var userOffset = TimeSpan.FromMinutes(330); // IST
 
-            // Use execution strategy (important for transient failures / retries)
             var exec = _context.Database.CreateExecutionStrategy();
 
-            return await exec.ExecuteAsync(async () =>
+            await exec.ExecuteAsync(async () =>
             {
-                await using var tx = await _context.Database.BeginTransactionAsync();
+                // Keep transaction SHORT
+                await using var tx = await _context.Database.BeginTransactionAsync(ct);
 
-                // 1) Read minimal info (DueDate) to compute IST day
+                // ✅ Load only what we need (DueDate) without tracking
                 var taskInfo = await _context.Tasks
+                    .AsNoTracking()
                     .Where(t => t.Id == id && t.UserId == userId)
                     .Select(t => new { t.Id, t.DueDate })
-                    .FirstOrDefaultAsync();
+                    .FirstOrDefaultAsync(ct);
 
-                // If already deleted (or never existed), treat as success (idempotent delete)
+                // ✅ Idempotent delete: if already deleted, treat as success
                 if (taskInfo == null)
                 {
-                    await tx.CommitAsync();
-                    return NoContent();
+                    await tx.CommitAsync(ct);
+                    return;
                 }
 
+                // ✅ Compute IST plan key
                 var istDay = DateOnly.FromDateTime(
                     new DateTimeOffset(taskInfo.DueDate, TimeSpan.Zero)
                         .ToOffset(userOffset)
                         .DateTime
                 );
 
-                // 2) Delete the Task using set-based delete (no concurrency exception)
+                // ✅ 1) Delete task (set-based)
                 await _context.Tasks
                     .Where(t => t.Id == id && t.UserId == userId)
-                    .ExecuteDeleteAsync();
+                    .ExecuteDeleteAsync(ct);
 
-                // 3) Find today's plan for that IST day
+                // ✅ 2) Find planId only (no Include)
                 var planId = await _context.DailyPlans
+                    .AsNoTracking()
                     .Where(p => p.UserId == userId && p.Date == istDay)
                     .Select(p => (int?)p.Id)
-                    .FirstOrDefaultAsync();
+                    .FirstOrDefaultAsync(ct);
 
+                // ✅ 3) Delete plan items + plan (set-based)
                 if (planId.HasValue)
                 {
-                    // 4) Delete items first (reduces locking issues)
                     await _context.DailyPlanItems
                         .Where(i => i.PlanId == planId.Value)
-                        .ExecuteDeleteAsync();
+                        .ExecuteDeleteAsync(ct);
 
-                    // 5) Delete plan
                     await _context.DailyPlans
                         .Where(p => p.Id == planId.Value)
-                        .ExecuteDeleteAsync();
+                        .ExecuteDeleteAsync(ct);
                 }
 
-                await tx.CommitAsync();
-                return NoContent();
+                await tx.CommitAsync(ct);
             });
+
+            return NoContent();
         }
 
         private static DateTime? CalcNudgeAtUtc(DateTime dueUtc, int leadMinutes = 10)
