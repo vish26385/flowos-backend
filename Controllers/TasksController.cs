@@ -3,6 +3,7 @@ using FlowOS.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Security.Claims;
 using Task = FlowOS.Api.Models.Task;
 
@@ -73,7 +74,7 @@ namespace FlowOS.Api.Controllers
 
         //// ✅ Get all /api/tasks or by due date /api/tasks?due=2025-10-13
         //[HttpGet]
-        //public async Task<IActionResult> GetTasks([FromQuery] DateTime? due)
+        //public async Task<IActionResult> GetTasks([FromQuery] string? due)
         //{
         //    var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
         //                 ?? User.FindFirst("id")?.Value;
@@ -85,8 +86,27 @@ namespace FlowOS.Api.Controllers
         //        .Where(t => t.UserId == userId)
         //        .AsQueryable();
 
-        //    if (due.HasValue)
-        //        query = query.Where(t => t.DueDate.Date == due.Value.Date);
+        //    // ✅ IST offset for now (later: per-user timezone)
+        //    var istOffset = TimeSpan.FromMinutes(330);
+
+        //    if (!string.IsNullOrWhiteSpace(due))
+        //    {
+        //        // due is expected as "yyyy-MM-dd"
+        //        if (!DateTime.TryParse(due, out var dueDate))
+        //            return BadRequest(new { message = "Invalid due. Use yyyy-MM-dd." });
+
+        //        // treat as DATE only
+        //        var istDay = dueDate.Date;
+
+        //        // IST day window -> UTC window
+        //        var istStartLocal = DateTime.SpecifyKind(istDay, DateTimeKind.Unspecified);
+        //        var istEndLocal = DateTime.SpecifyKind(istDay.AddDays(1), DateTimeKind.Unspecified);
+
+        //        var startUtc = new DateTimeOffset(istStartLocal, istOffset).UtcDateTime;
+        //        var endUtc = new DateTimeOffset(istEndLocal, istOffset).UtcDateTime;
+
+        //        query = query.Where(t => t.DueDate >= startUtc && t.DueDate < endUtc);
+        //    }
 
         //    var tasks = await query
         //        .OrderBy(t => t.DueDate)
@@ -115,11 +135,11 @@ namespace FlowOS.Api.Controllers
 
             if (!string.IsNullOrWhiteSpace(due))
             {
-                // due is expected as "yyyy-MM-dd"
-                if (!DateTime.TryParse(due, out var dueDate))
+                // ✅ STRICT parse: due must be exactly yyyy-MM-dd (prevents locale / timezone surprises)
+                if (!DateTime.TryParseExact(due, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dueDate))
                     return BadRequest(new { message = "Invalid due. Use yyyy-MM-dd." });
 
-                // treat as DATE only
+                // treat as DATE only (IST calendar day)
                 var istDay = dueDate.Date;
 
                 // IST day window -> UTC window
